@@ -1,0 +1,1587 @@
+---
+title: "Insurance for Viticulture: Linking Californian Climate Variability to Grape Yield Losses with Insurance Premiums"
+author: 
+  - "Bölcs Alexiane"
+  - "Campajola Milla"
+  - "Upeski Stefan"
+institute: HEC Lausanne
+date: 12/02/2025
+title-block-banner: "#1cc02dff" 
+toc-location: right
+bibliography: references.bib
+csl: https://raw.githubusercontent.com/citation-style-language/styles/master/harvard-university-of-leeds.csl
+format:
+  html:
+    output-file: "final_c.html"
+    mainfont: "Helvetica"
+    css: styles.css
+    toc: true
+    number-sections: true
+    html-math-method: katex
+    self-contained: true
+    code-overflow: wrap
+    code-fold: true
+    code-tools: true
+    echo: true          
+    include-in-header: # 
+      text: |
+        <style type="text/css">
+          .quarto-title-banner a {
+            color: #000000;
+          }
+        </style>
+    theme: default
+abstract: |
+  <div style="text-align: justify;">
+  This project uses a county-level panel (1999–2020) for 16 major Californian grape-growing counties to link climate indicators, grape production data, and crop insurance outcomes. We show that climate risk is highly heterogeneous across regions: hot, drought-prone counties approach climatic limits, while cooler or better-irrigated regions remain relatively buffered. The 2012–2016 drought did not reduce total production but triggered a geographic and economic reconfiguration, with low-value grapes declining in groundwater-dependent areas and higher-value wine grapes expanding in regions with secure surface water. Crop insurance only partially reflects these patterns: high-value premium wine regions combine high loss ratios with low coverage, while lower-value Central Valley producers appear to cross-subsidise their more exposed counterparts.
+  </div>
+
+---
+
+# Introduction
+
+Viticulture lies at the intersection of tradition, economic value, and environmental uncertainty. In regions like Lavaux, where vineyards shape both the landscape and cultural identity, it is impossible not to notice how dependent wine production is on timing, climate, and increasingly fragile ecological balances. Although our interest began locally, we chose to analyze California because of its abundant open data, allowing us to explore the same challenges on a broader scale. The core question remains unchanged: **how does climate variability translate into financial risk for winegrowers, and how effectively are these risks covered by insurance?**
+
+California provides a compelling case study because it produces some of the world’s most valuable wines while facing recurrent climate threats. Prolonged droughts, destructive frosts, heatwaves, and wildfire-driven smoke contamination have become part of the viticultural landscape. In 2025, for example, multiple vineyards were reported to have lost entire harvests due to smoke damage even when vines survived the fires, leaving millions of dollars’ worth of grapes unmarketable [@The_guardian_2025]. Such events illustrate that climate risk is no longer an occasional shock: it is a persistent factor shaping the future of wine production.
+
+In this context, crop insurance represents a central financial mechanism for managing climate-related risks in viticulture. Our study examines how climate variability influences the economics of insurance for wine grape production in California. We analyze how weather conditions shape premium levels, indemnity payouts, and public subsidies supporting the insurance system. In addition, we investigate whether insurance mechanisms adequately compensate growers when losses stem from events that affect grape quality rather than yield alone, such as smoke taint from wildfires. By linking climate indicators, insurance data and economic measures of vineyard production at the county level, this project documents how crop insurance currently protects winegrowers and to what extent existing insurance designs appear resilient as climate extremes intensify.
+
+## Overview
+
+This project examines how climate variability shapes financial risk in Californian viticulture through the lens of crop insurance. Wine grapes are both high value and highly climate-sensitive: droughts, heatwaves, frosts and wildfire-related smoke exposure can all reduce yields or compromise grape quality, often in ways that are difficult to predict or insure. While our motivation stemmed from wine regions such as Lavaux, California offers a richer empirical setting thanks to detailed public data on climate, agricultural production, and crop insurance.
+
+Using county-level data from 1999 to 2020, we construct a harmonised panel for 16 major grape-producing counties that together represent more than 80% of California’s wine production value. The database merges three dimensions: climate indicators (temperature, precipitation and drought indices), crop insurance records (liability, premiums, subsidies, indemnities and loss ratios) and economic measures of grape production (tonnage, acreage and value). This enables us to study how weather patterns and water-resource geography translate into production outcomes and insured losses, and how the design of the crop insurance system mediates these risks.
+
+Our empirical strategy combines exploratory visualisation, climate-based clustering of counties, and correlation analysis between climate, production and insurance variables. We first map climatic differences across regions to identify distinct risk profiles. We then analyse how the historic 2012–2016 drought reshaped grape production, paying particular attention to the role of surface water versus groundwater. Finally, we examine the evolution of premiums, indemnities, and loss ratios, and integrate these with production values to assess which regions face the greatest financial vulnerability from climate risk, given their level of insurance coverage. In doing so, the project provides evidence on where climate risk is currently borne within the system, and how well insurance mechanisms align with the spatial distribution of exposure in California’s wine grape industry.
+
+## Related Work
+
+Research on viticulture consistently shows that climate variability is one of the most significant sources of risk for winegrowers. Recent studies demonstrate that grapevines are highly sensitive to shifts in temperature, precipitation, and seasonal timing. 
+
+@Parker_2024, for instance, show that rising temperatures alter grapevine phenology and increase exposure to heat stress, affecting both yields and harvest stability. Complementing this, @Aloy_2024 review how climate change impacts grape composition, noting that warmer and more irregular growing seasons can reduce acidity and modify sugar levels, leading to substantial quality losses even when volumes are unaffected.
+
+California has also been the subject of analyses examining how long-term climate trends affect vineyard performance. @Gatto_2009 emphasize that the state’s premium wine regions are especially vulnerable to warming, drought, and extreme heat factors that can lower productivity and undermine market value. In addition, recent work highlights wildfire smoke as an emerging source of risk, capable of rendering grapes unmarketable even in the absence of direct fire damage, reinforcing the idea that climate-related losses in viticulture are both quantitative and qualitative.
+
+These vulnerabilities have increased the relevance of financial protection instruments such as crop insurance. @Sgroi_2022 note that insurance has become a central risk management tool for winegrowers facing increasingly unpredictable conditions, particularly in perennial systems where long-term investments heighten exposure to climatic shocks.
+
+From a broader perspective, evidence from the United States shows that climate change is already placing structural pressure on agricultural insurance systems. @Diffenbaugh_2021 estimate that historical warming increased Federal Crop Insurance Program losses by approximately US $27 billion between 1991 and 2017, illustrating how rising temperatures amplify loss ratios and challenge the financial sustainability of insurance schemes.
+
+Overall, the existing literature highlights that climate driven risks in viticulture are multifaceted and intensifying. However, fewer studies examine how weather anomalies relate simultaneously to production outcomes and insurance metrics within the Californian context. This study contributes to that discussion by jointly considering climate indicators, grape production data, and insurance variables at the county level.
+
+## Research Questions
+
+Before presenting the research questions, it is worth noting that our initial project proposal was built around a different set of questions. However, as we progressed in the analysis and gained a deeper understanding of the structure and limitations of our datasets, it became evident that a refined set of research questions would allow for a more meaningful and feasible investigation. The questions below therefore reflect an updated and more data-driven formulation, aligned with what can be reliably examined using the available information.
+
+1. How does climate variability differ across California's wine producing regions, and what geographic patterns of climate risk emerge from these differences?
+
+2. How do climate conditions and water resource geography shape grape production outcomes across California counties?
+
+3. How effectively does the crop insurance system compensate for climate related losses, and do insurance premiums accurately reflect regional climate risk?
+
+4. Which regions face the greatest financial vulnerability from climate risk, considering the combined effects of production value, climate exposure, and insurance coverage?
+
+Taken together, these questions aim to clarify how climate variability influences insurance costs, payouts, and financial exposure in the Californian wine grape industry, providing a structured basis for linking weather patterns to economic risk.
+
+# Dataset
+
+## Data collection
+
+Developing a structured database was an integral part of our pre-processing phase as it helped us in the data cleaning phase, saving time in subsequent phases.
+
+### Primary data source
+
+**[USDA Risk Management Agency – Crop Insurance Data (1999–2020)](https://www.rma.usda.gov)**  
+
+- Source: State-County-Crop Summary files (pipe-delimited text format)  
+- Coverage: California counties, grape commodity  
+- Annual files loaded and combined into single dataset  
+- Contains insurance metrics: liability, premiums, subsidies, indemnities, policy counts  
+
+**[USDA NASS – Wine Grape Production Data (1999–2020)](https://www.nass.usda.gov)**
+
+- Source: California county-level production statistics  
+- Purpose: Validate which counties have substantial grape industries  
+- Metrics: Production tonnage, harvested acres, dollar value  
+- Used to identify top 82% of California wine producers  
+
+**[NOAA – Climate Data (1999–2020)](https://www.ncei.noaa.gov/cdo-web/)**  
+
+- Source: Climate at a Glance API  
+- Variables: Temperature (avg, max, min), precipitation, drought indices  
+- Monthly observations aggregated to annual county-level  
+- Used for climate-based clustering analysis  
+
+**Note:** Wildfire proximity, smoke exposure, and air quality data not included despite increasing relevance for California grape regions (especially 2017–2020 fire years).
+
+### Database Structure
+
+At the beginning of the project, our working dataset was substantially larger than the final version. We initially collected data for about 50 California counties over a 20-year period (~1,000 observations). However, once the insurance, production, and climate datasets were merged, we encountered several structural issues, particularly in the insurance records due to USDA privacy suppression. Many counties exhibited non-recoverable missing patterns, such as having data only for a few years, making interpolation not possible.
+
+For this reason, we restricted our final dataset to the intersection of counties with complete data across all three domains. The final database includes 16 California counties, all of which are major grape-producing regions, with full coverage over 22 years (1999–2020), resulting in a consistent and complete dataset suitable for longitudinal trend analysis.
+
+**Final dataset dimensions**:
+
+- 352 observations (16 counties × 22 years)
+- 35 variables per observation (18 insurance, 6 climate, 11 production)
+- 100% coverage - no missing county-years
+
+**Counties included**:
+
+| Region             | Counties                                         |
+|--------------------|--------------------------------------------------|
+| North Coast Wine   | Mendocino, Lake, Napa, Sonoma, Solano            |
+| Central Valley     | Fresno, Kern, Kings, Madera, Merced, Sacramento, San Joaquin, Tulare, Yolo |
+| Sierra  Foothills  | El Dorado                                        |
+| Southern California| Riverside                                        |
+
+### Variable Descriptions
+ 
+Below we summarize the variables contained in each dataset. Since the insurance dataset is the core component of the analysis, we provide detailed ranges for its variables, while the production and weather datasets are reported as structured lists.
+
+**Insurance Dataset**  
+The insurance dataset contains these variables:
+
+| Variable                         | Type     | Range / Description                |
+|----------------------------------|----------|------------------------------------|
+| Location County Code             | Numeric  | [5; 111]                           |
+| Commodity Year                   | Numeric  | [1999; 2020]                       |
+| Policies Sold Count              | Numeric  | [4; 2’830]                         |
+| Policies Earning Premium Count   | Numeric  | [3; 2’234]                         |
+| Policies Indemnified Count       | Numeric  | [0; 565]                           |
+| Liability Amount                 | Numeric  | [$106’014; $277’000’000]           |
+| Total Premium Amount             | Numeric  | [$9’253; $7’960’000]               |
+| Subsidy Amount                   | Numeric  | [$4’973; $4’750’000]               |
+| Indemnity Amount                 | Numeric  | [$0; $111’200’000]                 |
+| Loss Ratio                       | Numeric  | [0.00; 15.08]                      |
+
+Additional variables: Units Earning Premium, Units Indemnified, Net Reported Quantity, Endorsed Acres, State/Private Subsidy, Additional Subsidy, EFA Premium Discount.
+
+**Production Dataset Variables**  
+The production dataset includes the following variables: Year, CommodityCode, CropName, CountyCode, County, HarvestedAcres, Yield_Per_Acre, Production, Price_Per_Unit, Unit, Value_Dollars.  
+
+**Weather Dataset Variables**  
+The weather dataset includes the following variables: County, CountyCode, Year, avg_temp, max_temp, min_temp, precipitation, drought_severity_index, palmer_z_index.
+
+## Challenges and Limitations 
+
+### Main Challenge: USDA Privacy Suppression
+
+As stated in our project proposal, the main challenge was USDA's privacy protection mechanism. When fewer than three producers exist for a commodity in a county, data is suppressed and aggregated into "*All Other Crops*". This created systematic missing data for smaller producing counties.
+
+**Our Solution**: Rather than attempting extraction or estimation, we focused on major producers with explicit records. This sacrifices complete geographic coverage but ensures every data point represents actual reported insurance activity.
+
+### Methodological Testing
+
+**State-Wide Ratio Approach** (Rejected):
+
+- Concept: Calculate single average ratio for all California counties
+- Problem: California is too heterogeneous - Napa wine country ≠ Central Valley table grapes ≠ desert agriculture
+- Result: Would create false positives in non-grape counties
+
+**Production-Based Selection** (Final Approach):
+
+- Used wine production data to identify top 82% producers
+- Selected counties with 20+ years of complete insurance records
+- Focused on proven major producers rather than estimating for all counties
+
+**Climate-Based Clustering** (Used with the top 82% producers):
+
+Applied K-means clustering using six climate variables. Optimal k = 4 clusters. The climate clustering successfully separated California wine regions and the Central Valley.
+
+::: {.callout-note title="Cluster Assignments"}
+| Cluster |                       | Counties                                           |
+|---------|-----------------------|----------------------------------------------------|
+| **0**   | Central Valley        | Fresno, Madera, Tulare                             |
+| **1**   | Warm Interior         | Napa, Sacramento, San Joaquin, Solano, Yolo        |
+| **2**   | Hot & Dry             | Kern, Kings, Merced, Riverside                     |
+| **3**   | Cool Wine Regions     | El Dorado, Lake, Mendocino, Sonoma                 |
+:::
+
+### Limitations
+
+One of the challenges we faced was that the various data reflect county-level aggregations. This gives us an overall trend for each county but does not explain the real effects that different microclimates or vineyard locations have within county boundaries. A relevant next step could be to analyze at the American Viticultural Area (AVA) level rather than county level.
+Another next step could be to integrate wildfire data, including fire perimeters, smoke days, and air quality indices to directly assess fire impacts on insurance claims. This would be particularly valuable for 2017-2020 analysis in wine regions affected by major fires.
+
+What the database does **NOT** include:
+
+- Small producers: Counties outside top 82% of production excluded
+- Emerging regions: New wine areas with insufficient data history
+- Sub-county variation: County aggregation masks within-county differences
+- Individual farms: Privacy suppression and aggregation prevent farm-level analysis
+
+Another limitation is temporal resolution. Indeed, our database uses annual observations. More granular analysis (seasonal or monthly) could reveal within-year patterns such as timing of loss events or harvest-period claims.
+
+Wildfire Data Absence: A critical limitation is the absence of wildfire proximity and smoke exposure data. California wildfires have increasingly affected grape-growing regions, particularly wine areas:
+
+- 2017: North Bay fires (Napa, Sonoma, Mendocino)
+- 2018: Carr Fire, Mendocino Complex
+- 2019: Kincade Fire (Sonoma)
+- 2020: Glass Fire, LNU Lightning Complex (Napa, Sonoma)
+
+Smoke exposure can cause "smoke taint" in wine grapes, leading to insurance claims even without direct fire damage. Our climate dataset includes drought indices but not fire occurrence, smoke days, or air quality metrics. This limits our ability to assess fire-related loss patterns despite their growing importance in California viticulture.
+
+### Missing and Non-Missing Values
+
+Our analysis integrated three data sources: California wine production records, crop insurance data, and weather data. We applied a completeness filter based on production and insurance data availability.
+
+**Selection Criteria**:
+We retained only counties with complete temporal coverage in both production and insurance databases (no missing years). Weather data was complete for all counties and years. This intersection approach yielded 16 counties.
+
+Rather than using interpolation for missing values, we required complete observed data. Interpolation is only statistically valid when missing data occurs in short, contiguous gaps between observed years (e.g., observed values at t-h and t+h, with one or a few consecutive missing years in between), allowing the estimation to capture temporal patterns from adjacent observations. Counties with missing data at period boundaries or with non adjacent gaps would introduce systematic bias. Our approach ensures all variables reflect actual measurements rather than statistical estimates.
+
+**Coverage**:
+The 16 counties represent 82.2% of California wine production value, including the top 4 producers (Napa, Sonoma, San Joaquin, Fresno represent 55.1%) and 9 of the top 12 counties statewide.
+
+**Key Exclusions**:
+Four economically significant counties lacked complete data. We prioritized data quality over economic coverage, accepting ~8% loss in production value to ensure robust analysis without imputation bias.
+
+Another limitation concerns the absence of spatial wildfire variables, meaning that production changes during 2017–2020 may be related to fire events but cannot be directly attributed.
+
+# Exploratory Analysis
+
+After completing the data cleaning process, we can now move on to the central stage of our work: Exploratory Analysis. This step will allow us to visually examine relationships between variables and to more clearly observe how specific indicators evolve over time. Through graphical representations, we will be able to better understand the structure of our dataset and reveal meaningful patterns or trends.
+
+## Interactive Climate Visualization Across Californian Counties {#sec-related_1}
+
+In order to assess how climate variability influences grape-growing risks across California, an initial step of our project consists in mapping county-level weather differences. To do so, we build an interactive choropleth map showing climate indicators across time (e.g., average temperature, precipitation, drought severity). This allows us to observe how climatic stressors evolve geographically and temporally, helping us identify counties with higher exposure to extreme weather.
+
+**Description of Climate Variables**:
+
+- Palmer Z-Index: Measures short-term soil moisture stress (negative values indicate drought; positive values indicate wet conditions)
+- Average Temperature: Overall mean temperature of each county.
+- Maximum Temperature: Highest recorded temperatures, relevant for heat stress on grape vines
+- Minimum Temperature: Lowest recorded temperatures, important for identifying frost risk
+- Annual Precipitation: Total yearly rainfall, affecting water availability for vineyards
+- Drought Severity Index: Indicates long-term drought conditions and prolonged water deficit
+
+```{python}
+#| code-fold: true
+
+import pandas as pd
+import plotly.graph_objects as go
+
+weather_agg = pd.read_csv("weather_by_year.csv")
+weather_agg["County"] = weather_agg["County"].str.strip()
+
+# map county → FIPS
+fips_map = {
+    'Amador': '06005', 'Calaveras': '06009', 'Colusa': '06011',
+    'Contra Costa': '06013', 'El Dorado': '06017', 'Fresno': '06019',
+    'Kern': '06029', 'Kings': '06031', 'Lake': '06033', 'Madera': '06039',
+    'Mendocino': '06045', 'Merced': '06047', 'Monterey': '06053',
+    'Napa': '06055', 'Riverside': '06065', 'Sacramento': '06067',
+    'San Benito': '06069', 'San Joaquin': '06077', 'San Luis Obispo': '06079',
+    'Santa Barbara': '06083', 'Santa Clara': '06085', 'Solano': '06095',
+    'Sonoma': '06097', 'Stanislaus': '06099', 'Tulare': '06107', 'Yolo': '06113'
+}
+
+weather_agg["fips"] = weather_agg["County"].map(fips_map)
+
+years = sorted(weather_agg["Year"].unique())
+
+variable_configs = {
+    "avg_temp": {
+        "name": "Average Temperature",
+        "unit": "°F",
+        "colorscale": [[0, "#0066FF"], [0.25, "#00CCFF"], [0.5, "#FFCC00"],
+                       [0.75, "#FF6600"], [1, "#FF0000"]],
+        "zmin": 50, "zmax": 70,
+    },
+    "max_temp": {
+        "name": "Maximum Temperature",
+        "unit": "°F",
+        "colorscale": [[0, "#4169E1"], [0.25, "#FFA500"], [0.5, "#FF6347"],
+                       [0.75, "#DC143C"], [1, "#8B0000"]],
+        "zmin": 60, "zmax": 85,
+    },
+    "min_temp": {
+        "name": "Minimum Temperature",
+        "unit": "°F",
+        "colorscale": [[0, "#00008B"], [0.25, "#4169E1"], [0.5, "#87CEEB"],
+                       [0.75, "#FFD700"], [1, "#FF8C00"]],
+        "zmin": 35, "zmax": 55,
+    },
+    "precipitation": {
+        "name": "Annual Precipitation",
+        "unit": " inches",
+        "colorscale": [[0, "#FFF8DC"], [0.25, "#87CEEB"], [0.5, "#4169E1"],
+                       [0.75, "#0000CD"], [1, "#00008B"]],
+        "zmin": 0, "zmax": 6,
+    },
+    "drought_severity_index": {
+        "name": "Drought Severity Index",
+        "unit": "",
+        "colorscale": [[0, "#8B0000"], [0.25, "#FF4500"], [0.5, "#FFD700"],
+                       [0.75, "#32CD32"], [1, "#006400"]],
+        "zmin": -4, "zmax": 4,
+    },
+    "palmer_z_index": {
+        "name": "Palmer Z-Index",
+        "unit": "",
+        "colorscale": [[0, "#B22222"], [0.25, "#FF6347"], [0.5, "#F0E68C"],
+                       [0.75, "#90EE90"], [1, "#228B22"]],
+        "zmin": -3, "zmax": 3,
+    },
+}
+
+initial_var = "avg_temp"
+initial_cfg = variable_configs[initial_var]
+first_year = years[0]
+first_year_data = weather_agg[weather_agg["Year"] == first_year]
+
+fig = go.Figure(
+    data=go.Choropleth(
+        geojson="https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json",
+        locations=first_year_data["fips"],
+        z=first_year_data[initial_var],
+        colorscale=initial_cfg["colorscale"],
+        zmin=initial_cfg["zmin"],
+        zmax=initial_cfg["zmax"],
+        text=(
+            first_year_data["County"]
+            + "<br>" + initial_cfg["name"] + ": "
+            + first_year_data[initial_var].round(1).astype(str)
+            + initial_cfg["unit"]
+        ),
+        hoverinfo="text",
+        marker_line_width=0.5,
+        marker_line_color="rgb(100,100,100)",
+        colorbar=dict(title=initial_cfg["unit"], thickness=15, len=0.8, x=1.0),
+    )
+)
+
+frames = []
+for var_name, cfg in variable_configs.items():
+    for year in years:
+        year_data = weather_agg[weather_agg["Year"] == year]
+
+        frames.append(
+            go.Frame(
+                data=[
+                    go.Choropleth(
+                        locations=year_data["fips"],
+                        z=year_data[var_name],
+                        colorscale=cfg["colorscale"],
+                        zmin=cfg["zmin"],
+                        zmax=cfg["zmax"],
+                        text=(
+                            year_data["County"]
+                            + "<br>" + cfg["name"] + ": "
+                            + year_data[var_name].round(1).astype(str)
+                            + cfg["unit"]
+                        ),
+                        hoverinfo="text",
+                        marker_line_width=0.5,
+                        marker_line_color="rgb(100,100,100)",
+                        colorbar=dict(title=cfg["unit"],
+                                      thickness=15, len=0.8, x=1.0),
+                    )
+                ],
+                name=f"{var_name}_{year}",
+            )
+        )
+
+fig.frames = frames
+
+sliders_by_var = {}
+
+for var_name, cfg in variable_configs.items():
+    steps = []
+    for year in years:
+        steps.append(
+            dict(
+                args=[
+                    [f"{var_name}_{year}"],
+                    {
+                        "frame": {"duration": 0, "redraw": True},
+                        "mode": "immediate",
+                        "transition": {"duration": 0},
+                    },
+                ],
+                label=str(year),
+                method="animate",
+            )
+        )
+
+    sliders_by_var[var_name] = dict(
+        active=0,
+        yanchor="bottom",
+        y=-0.05,
+        xanchor="left",
+        x=0.25,
+        currentvalue=dict(prefix="Year: ", font=dict(size=16)),
+        pad=dict(t=60, b=10),
+        len=0.7,
+        steps=steps,
+    )
+
+buttons = []
+
+for var_name, cfg in variable_configs.items():
+    year0 = years[0]
+    data0 = weather_agg[weather_agg["Year"] == year0]
+
+    z0 = data0[var_name]
+    text0 = (
+        data0["County"]
+        + "<br>" + cfg["name"] + ": "
+        + data0[var_name].round(1).astype(str)
+        + cfg["unit"]
+    )
+
+    buttons.append(
+        dict(
+            label=cfg["name"],
+            method="update",
+            args=[
+                {
+                    "z": [z0],
+                    "text": [text0],
+                    "colorscale": [cfg["colorscale"]],
+                    "zmin": [cfg["zmin"]],
+                    "zmax": [cfg["zmax"]],
+                    "colorbar": [
+                        dict(title=cfg["unit"], thickness=15, len=0.8, x=1.0)
+                    ],
+                },
+                {
+                    "sliders": [sliders_by_var[var_name]],
+                    "title": {
+                        "text": f"{cfg['name']} for each county in California"
+                    },
+                },
+            ],
+        )
+    )
+
+dropdown_menu = dict(
+    buttons=buttons,
+    direction="down",
+    x=0.01,
+    xanchor="left",
+    y=0.98,
+    yanchor="top",
+    showactive=True,
+    bgcolor="white",
+    font=dict(size=14),
+)
+
+fig.update_geos(fitbounds="locations", visible=False)
+
+fig.update_layout(
+    title=dict(
+        text=f"{initial_cfg['name']} for each county in California",
+        font=dict(size=18),
+    ),
+    height=600,  # prima era 950
+    margin=dict(l=0, r=80, t=60, b=40),
+    updatemenus=[dropdown_menu],
+    sliders=[sliders_by_var[initial_var]],
+)
+
+fig.show()
+
+```
+
+From the interactive map, we observe that counties with insured grape production generally fall within moderate climatic conditions, particularly in terms of growing-season temperatures, without persistent extremes. This is not surprising: commercial viticulture is typically established in environments where Vitis vinifera can thrive. Historically, growers have selected vineyard sites with temperatures near the optimal physiological thresholds for grape development [@Jones_2010]. During the growing season, this typically corresponds to a range of about 77–90 °F (25–32 °C), conditions that are generally considered favorable for grapevine physiological development and ripening.
+
+Despite the relative stability of average temperatures observed in our dataset, drought conditions represent a significant and insurance-relevant climate risk for viticulture. Periods of prolonged water deficit are visible across multiple years in both the Palmer Z-Index and the Palmer Drought Severity Index, revealing recurrent episodes of severe dryness that exceed viticultural tolerance levels. While moderate drought can improve grape quality by reducing berry size and concentrating sugars, sustained water deficits negatively affect vine physiology and berry composition, as documented in comprehensive reviews and experimental studies [@Gambetta_2020; @Scholasch_2019; @Cogato_2022]. Moreover, extreme drought conditions extend risk beyond agricultural productivity: drier soils and vegetation increase the likelihood and intensity of wildfires, a growing threat in wine-producing regions [@Abatzoglou_2018; @Williams_2019]. Such fires contaminate grapes through smoke taint, often without reducing yields, impairing sensory quality and commercial value, and may directly damage or destroy vines when fire fronts approach vineyard areas. Consequently, drought does not merely stress vines but acts as a compounding hazard that influences both grape quality and the broader production environment through wildfire exposure.
+
+## Interactive Visualization of Grape Production in California {#sec-related_2}
+
+After examining climatic variability across Californian counties, it is essential to understand how these environmental conditions manifest in the grape production itself. To do this, we developed an interactive time-series visualization that allows users to explore several production indicators between 1999 and 2020, including total tonnage, yield per acre, harvested acreage, production value, and average price per ton. 
+
+```{python}
+#| code-fold: true
+
+import pandas as pd
+import plotly.graph_objects as go
+
+df = pd.read_csv("production_1999_2020.csv")
+
+df = df.sort_values(["County", "Year"])
+
+variables = {
+    "Production": "Production (Tons)",
+    "Yield_Per_Acre": "Yield per Acre (Tons/Acre)",
+    "HarvestedAcres": "Harvested Acres",
+    "Value_Dollars": "Value (USD)",
+    "Price_Per_Unit": "Price per Unit (USD per Ton)",
+}
+
+counties = sorted(df["County"].unique())
+
+data_traces = []
+x_values = {}  # save years for each county
+y_values_by_var = {var: [] for var in variables.keys()}
+
+for county in counties:
+    sub = df[df["County"] == county].sort_values("Year")
+
+    years = sub["Year"].values
+    x_values[county] = years
+
+    for var in variables.keys():
+        y_values_by_var[var].append(sub[var].values)
+
+default_var = "Production"
+
+for i, county in enumerate(counties):
+    trace = go.Scatter(
+        x=x_values[county],
+        y=y_values_by_var[default_var][i],
+        mode="lines+markers",
+        name=county
+    )
+    data_traces.append(trace)
+
+fig = go.Figure(data=data_traces)
+
+buttons = []
+
+for var, label in variables.items():
+
+    new_y = y_values_by_var[var]
+
+    buttons.append(
+        dict(
+            label=label,
+            method="update",
+            args=[
+                {"y": new_y}, 
+                {
+                    "yaxis": {"title": label},
+                    "title": f"{label} over time by County"
+                }
+            ]
+        )
+    )
+
+fig.update_layout(
+    title=f"{variables[default_var]} over time by County",
+    xaxis_title="Year",
+    yaxis_title=variables[default_var],
+    updatemenus=[
+        dict(
+            type="dropdown",
+            buttons=buttons,
+            direction="down",
+            showactive=True,
+            x=0.0,        
+            y=1.15,       
+            xanchor="left",
+            yanchor="top",
+            pad={"t": 5, "l": 5}
+        )
+    ],
+    legend_title_text="County",
+    margin=dict(t=110)  
+)
+
+fig.show()
+
+```
+
+What immediately emerges from this visualization is the striking heterogeneity between the production of the counties. Fresno, Kern, and San Joaquin consistently dominate in sheer volume, producing far more grapes than smaller regions. Yet this hierarchy changes when switching to production value or price per ton: counties such as Napa and Sonoma, despite their comparatively modest output, generate far higher economic value thanks to their positioning in the premium wine market. This contrast illustrates that agricultural risk in viticulture is not determined solely by the quantity harvested but by the financial value embedded in each ton of grapes.
+
+The chart also provides insight into how the climatic patterns described in @sec-related_1 may relate to production outcomes, although the relationship is not systematically one-to-one. In several instances, noticeable reductions in grape production occur during years marked by severe drought or elevated heat stress, suggesting that extreme climatic conditions can contribute to yield or value declines. Yet this alignment is not universal: some intense drought years show only limited production impacts, while certain production drops arise in years without clear climatic anomalies. This variability reflects the fact that vineyard output is influenced not only by weather but also by other factors.
+
+Overall, this interactive graph serves as a bridge between climatic exposure and economic vulnerability. It shows how weather shocks materialize in real production data and highlights the counties where the economic value at risk is greatest. As such, it provides a necessary foundation for interpreting the insurance behaviors and risk patterns explored in the following sections.
+
+### Drought Impact Analysis (2012-2016): Geographic Vulnerability and Market Restructuring {#sec-related_3}
+
+The interactive production trends in @sec-related_2 show that climate stress does not uniformly translate into production losses. To understand this heterogeneity, we examine California's historic 2012-2016 drought, comparing average production during these five years to the pre-drought baseline (1999-2011).
+
+```{python}
+#| echo: false
+
+from IPython.display import HTML
+
+HTML("""
+<div style='text-align: center;'>
+    <img src="figure_1.jpeg" style="width:400px;">
+</div>
+""")
+```
+
+The results are paradoxical: 4 counties collapsed (-5.8% to -27.0%, losing 289,000 tons per year) while 12 counties expanded (+10.1% to +46.9%, gaining 475,000 tons per year), yielding net statewide growth of over 185,000 tons per year. Climate variables fail to explain this divergence counties in the hottest, driest cluster (Cluster 2: 64.7°F, 0.67 in/mo precipitation) averaged +21.4% growth, while cooler, wetter counties (Cluster 0: 56.1°F, 1.61 in/mo) averaged -16.9% decline.
+
+Instead, water source geography determines outcomes. All four declining counties (Tulare, Kern, Madera, Fresno) are located in the closed Tulare Basin, where agriculture depends exclusively on groundwater that failed under drought stress. All twelve growing counties possess surface water access via rivers (Sacramento, San Joaquin, Kings) or aqueducts (Colorado River). This pattern reveals a deeper structural crisis in California agriculture: decades of groundwater overdraft created vulnerability that the 2012-2016 drought exposed.  Groundwater decline in the southern San Joaquin Valley rendered some regions permanently unsuitable for intensive irrigation, forcing production to relocate toward water-secure geographies.
+
+For viticulture, this restructuring accelerated a pre-existing transition: exit of low-value table grapes from groundwater-dependent areas, and expansion of high-value wine production in river-accessible regions where moderate water stress can actually enhance quality. The drought did not reduce California grape production, it permanently relocated it. This has critical implications for insurance risk models, which must account for water infrastructure rather than climate variables alone to accurately price regional vulnerability.
+
+## Interactive Visualization of Crop Insurance Activity in California
+
+After exploring climatic variability across counties, we now focus on how weather-related risks translate into crop insurance dynamics. To do so, we created an interactive multi-variable line chart showing how insurance premiums and indemnities have evolved over time for grape production in California. 
+
+```{python}
+#| code-fold: true
+
+import pandas as pd
+import plotly.graph_objects as go
+
+insurance = pd.read_csv('insurance_1999_2020.csv')
+insurance['County'] = insurance['Location County Name'].str.strip()
+insurance['Year'] = insurance['Commodity Year']
+
+variable_configs = {
+    'Loss Ratio': {
+        'column': 'Loss Ratio',
+        'title': 'Loss Ratio Over Time by County',
+        'yaxis': 'Loss Ratio',
+        'format': ':.2f',
+        'color': 'Viridis'
+    },
+    'Total Premium Amount': {
+        'column': 'Total Premium Amount',
+        'title': 'Total Premium Amount Over Time by County',
+        'yaxis': 'Premium Amount ($)',
+        'format': ':,.0f',
+        'color': 'Plasma'
+    },
+    'Indemnity Amount': {
+        'column': 'Indemnity Amount',
+        'title': 'Indemnity Amount Over Time by County',
+        'yaxis': 'Indemnity Amount ($)',
+        'format': ':,.0f',
+        'color': 'Inferno'
+    },
+    'Policies Sold Count': {
+        'column': 'Policies Sold Count',
+        'title': 'Number of Policies Sold Over Time by County',
+        'yaxis': 'Number of Policies',
+        'format': ':.0f',
+        'color': 'Cividis'
+    },
+    'Policies Indemnified Count': {
+        'column': 'Policies Indemnified Count',
+        'title': 'Number of Policies Indemnified Over Time by County',
+        'yaxis': 'Indemnified Policies',
+        'format': ':.0f',
+        'color': 'Turbo'
+    },
+    'Subsidy Amount': {
+        'column': 'Subsidy Amount',
+        'title': 'Subsidy Amount Over Time by County',
+        'yaxis': 'Subsidy Amount ($)',
+        'format': ':,.0f',
+        'color': 'Portland'
+    },
+    'Liability Amount': {
+        'column': 'Liability Amount',
+        'title': 'Liability Amount Over Time by County',
+        'yaxis': 'Liability Amount ($)',
+        'format': ':,.0f',
+        'color': 'Jet'
+    }
+}
+
+vivid_colors = [
+    '#E74C3C',  
+    '#3498DB',  
+    '#2ECC71',  
+    '#F39C12', 
+    '#9B59B6',  
+    '#1ABC9C',  
+    '#E67E22',  
+    '#34495E', 
+    '#16A085',  
+    '#27AE60',  
+    '#2980B9',  
+    '#8E44AD',  
+    '#C0392B',  
+    '#D35400',  
+    '#7F8C8D',  
+    '#BDC3C7',  
+    '#95A5A6',  
+    '#5DADE2',  
+    '#48C9B0',  
+    '#F4D03F',  
+    '#EB984E',  
+    '#AF7AC5',  
+    '#EC7063',  
+    '#5499C7',  
+]
+
+counties = sorted(insurance['County'].unique())
+county_colors = {county: vivid_colors[i % len(vivid_colors)] for i, county in enumerate(counties)}
+
+# start with first variable (Loss Ratio)
+initial_var = 'Loss Ratio'
+config = variable_configs[initial_var]
+
+fig = go.Figure()
+
+for var_name, var_config in variable_configs.items():
+    for county in counties:
+        county_data = insurance[insurance['County'] == county].sort_values('Year')
+        
+        if len(county_data) == 0:
+            continue
+        
+        visible = (var_name == initial_var)
+        
+        fig.add_trace(go.Scatter(
+            x=county_data['Year'],
+            y=county_data[var_config['column']],
+            mode='lines+markers',
+            name=county,
+            line=dict(color=county_colors[county], width=2),
+            marker=dict(size=6),
+            hovertemplate='<b>%{fullData.name}</b><br>' +
+                          'Year: %{x}<br>' +
+                          var_config['yaxis'] + ': %{y' + var_config['format'] + '}<br>' +
+                          '<extra></extra>',
+            visible=visible,
+            legendgroup=county,
+            showlegend=True  
+        ))
+
+buttons = []
+num_counties = len(counties)
+
+for var_name, var_config in variable_configs.items():
+    # Calculate which traces to show for this variable
+    visible_array = []
+    showlegend_array = []
+    
+    for v in variable_configs.keys():
+        if v == var_name:
+            
+            visible_array.extend([True] * num_counties)
+            showlegend_array.extend([True] * num_counties)
+        else:
+            
+            visible_array.extend([False] * num_counties)
+            showlegend_array.extend([False] * num_counties)
+    
+    button = dict(
+        label=var_name,
+        method='update',
+        args=[
+            {'visible': visible_array, 'showlegend': showlegend_array},
+            {
+                'title': f'<b>{var_name}</b><br><span style="font-size:16px">{var_config["title"]}</span>',
+                'yaxis': {'title': var_config['yaxis']}
+            }
+        ]
+    )
+    buttons.append(button)
+
+fig.update_layout(
+    title=dict(
+        text=f'<b>{initial_var}</b><br><span style="font-size:16px">{config["title"]}</span>',
+        font=dict(size=20, family='Arial'),
+        x=0.5,
+        xanchor='center'
+    ),
+    xaxis=dict(
+        title='Year',
+        tickmode='linear',
+        tick0=1999,
+        dtick=2,
+        gridcolor='lightgray',
+        showgrid=True
+    ),
+    yaxis=dict(
+        title=config['yaxis'],
+        gridcolor='lightgray',
+        showgrid=True
+    ),
+    hovermode='closest',
+    height=500,         
+    width=800,      
+    showlegend=True,
+    legend=dict(
+        title=dict(text='County', font=dict(size=14)),
+        orientation="v",
+        yanchor="top",
+        y=0.99,
+        xanchor="left",
+        x=1.01,
+        font=dict(size=10),
+        bgcolor="rgba(255,255,255,0.8)",
+        bordercolor="gray",
+        borderwidth=1
+    ),
+    plot_bgcolor='white',
+    
+    updatemenus=[
+        dict(
+            buttons=buttons,
+            direction="down",
+            pad={"r": 10, "t": 10},
+            showactive=True,
+            x=0.01,
+            xanchor="left",
+            y=1.15,
+            yanchor="top",
+            bgcolor="white",
+            bordercolor="gray",
+            borderwidth=2,
+            font=dict(size=13)
+        )
+    ],
+    margin=dict(l=60, r=180, t=90, b=60)
+)
+
+fig.show()
+
+```
+
+The interactive line chart shows that premiums tend to rise in smoother, step-like movements over longer periods (2001, 2009, 2014, 2020). The two most pronounced peaks, in 2019 and 2020, follow years of severe droughts, suggesting some responsiveness to climatic stress. Yet this link does not appear systematically across all major drought episodes, pointing to additional drivers behind premium adjustments. Overall, climatic variability influences premium dynamics only partially, with notable differences across counties. In contrast, liability increases steadily, indicating an expansion of insured exposure, whether due to higher vineyard values, broader adoption of insurance among larger producers, or growing insured acreage.
+
+Indemnities do not follow a perfectly predictable pattern with respect to climatic anomalies. In some counties, indemnity peaks coincide with severe drought or heat episodes, while in others they appear with a one-year delay, reflecting physiological carry-over effects such as impaired bud formation [@Scholasch_2019]. However, the link between weather anomalies and indemnities is far from systematic: several intense drought years are associated with only moderate indemnities, and some indemnity spikes occur in years without clearly identifiable climatic extremes. This irregularity arises both from the diverse ways weather can affect grape production (direct damage, quality losses, or buffered impacts through irrigation or management) and from the fact that indemnities only occur when growers carry sufficient insurance coverage. By contrast, subsidies follow drought waves more closely, as they scale with insured exposure rather than with realised losses. Even though neither indemnities nor premiums show a consistent, systematic correspondence with weather anomalies, they nevertheless exhibit simultaneous peaks in certain years, such as 2014 and 2020, indicating that major stress episodes can still create aligned financial signals across the insurance system. This comparison highlights that indemnities and premiums respond to climate in different ways, intersecting only during the most pronounced stress events.
+
+A closer look at the 2014-2015 period illustrates how climatic pressure interacts with insurance outcomes in a nuanced way. As discussed in @sec-related_3, Fresno is among the counties particularly exposed to drought because its orchards rely heavily on groundwater irrigation. The county experienced pronounced drought conditions (DSI ≈ −7.5 in 2014 and −6.0 in 2015, with Palmer Z-index values of −2.5 and −2.0), and indemnities were indeed among the highest statewide in both years. In 2014, Fresno received more than USD 11 million in indemnities, which corresponds to the peak of the series. Yet indemnities fall to slightly above USD 4 million in 2015 even though drought conditions remain severe. This decline is partly consistent with the evolution of production, which increases from around 660,000 tons in 2014 to about 770,000 tons in 2015, suggesting at least some improvement in yields or management outcomes. At the same time, 2014 corresponds to Fresno’s highest premium payments in the dataset, while premiums decline slightly in 2015. This is counterintuitive if growers were simply reacting to the previous year’s losses by increasing coverage. Instead, this pattern may reflect increased premium rates discouraging participation, modest improvements in expected conditions, or structural adjustments in insured exposure (for instance, changes in insured acreage or varietal composition). Overall, this case illustrates how coverage choices, production responses, and insurance design jointly modulate the translation of climatic stress into final indemnities.
+
+In our data, 2020 stands out as the year with the highest peak in both indemnity amounts and loss ratios across nearly all counties. This simultaneous spike indicates that the financial impact that year was exceptionally severe compared to any other point in the 20-year series. Rather than resulting from a single climatic driver, the 2020 peak appears to stem from the concurrence of multiple stressors. The season coincided with one of the most extreme wildfire years in recent California history, and according to @Zakowski_2023, several of these fires occurred within or directly adjacent to key viticultural areas, increasing the likelihood of both direct damage and smoke-related quality losses. These conditions were further amplified by COVID-19-related labour shortages and logistical disruptions, which constrained vineyard operations during an already challenging season @Swinnen_2020. Although insurance data do not specify causes of loss, the overlap of these factors provides a plausible explanation for the unusually high indemnities observed in 2020. This extreme year illustrates the scale of economic losses that historical climate and insurance data can reveal when multiple stressors coincide.
+
+## Correlation Between Climate, Production and Insurance Cluster Approaches
+
+To explore how climate, production, and insurance variables relate across different environmental contexts, we computed correlation matrices for each climate cluster. This allows us to compare patterns across regions with distinct temperature and precipitation profiles.
+
+```{python}
+#| echo: false
+
+from IPython.display import HTML
+
+HTML("""
+<div style='text-align: center;'>
+    <img src="figure_2.jpeg" style="width:600px;">
+</div>
+""")
+```
+
+**Temperature-Production Relationship**
+
+Three clusters, Central Valley, Warm Interior, and Cool Wine-show positive correlations between temperature and production (+0.36 to +0.63), indicating they operate below harmful temperature thresholds, where moderate warming can enhance yields. Consistent with the drought impact patterns documented in @sec-related_3, the modest +0.36 correlation between the drought index and production in Cluster 0 (Central Valley) reflects structural differences between counties rather than year-to-year drought effects: areas with better baseline water availability (e.g., Madera) sustain higher average production than structurally drier areas (e.g., Tulare). In stark contrast, Cluster 2 (Hot & Dry) exhibits a very strong negative correlation (r = –0.68), signaling catastrophic production losses from additional heat and highlighting severe climate vulnerability.
+
+**Temperature-Loss Relationship**
+
+ Temperature-driven losses are cluster-specific. Only Cluster 2 shows a meaningful positive correlation (+0.33) between heat and insurance losses, confirming that extreme heat triggers crop failures in already hot regions. Other clusters have near-zero or negative correlations, showing moderate warming does not increase losses. Precipitation-loss correlations reflect baseline water availability: dry regions (Clusters 0 and 2) benefit from rain, whereas moderate-rainfall regions (Cluster 1) experience rain-related damage (+0.17).
+
+**Insurance Pricing Efficiency**
+
+ Actuarially sound pricing appears only in Cluster 2 (premium vs temperature r = +0.84). Clusters 0 and 1 show weak or misaligned pricing responses (r = +0.03 and -0.24), indicating premiums do not reflect temperature risk. Drought risk is also often mispriced, especially in Clusters 1 and 3. Moreover, in Cluster 3, premiums are tightly linked to production rather than climate, with a premium-production correlation of r = 0.87, suggesting that pricing primarily scales with output rather than drought vulnerability.
+
+**Implications**
+
+ Uniform insurance pricing obscures the highly heterogeneous climate vulnerabilities across California’s wine regions. Cool and moderate clusters may benefit from modest warming, while hot, arid regions already face climate limits. Cluster-specific risk models are essential to prevent underpricing and support adaptation in regions approaching critical production thresholds.
+
+**Notes**: Analysis examines baseline climate-outcome relationships across counties to assess regional climate vulnerability. Climate variables represent long-term county averages; thus correlations reflect between-county differences rather than temporal variability. While this cannot assess specific drought events, it identifies regional climate thresholds relevant for long-term adaptation planning. Temporal analysis of the 2012-2016 drought period validates production impacts in vulnerable regions.
+
+## Economic Vulnerability: Integrating Production Value, Climate Exposure, and Insurance Coverage
+
+```{python}
+#| echo: false
+
+import pandas as pd
+
+# Carica i dati
+insurance = pd.read_csv("insurance_1999_2020.csv")
+production = pd.read_csv("production_1999_2020.csv")
+
+# Aggrego produzione
+prod_agg = (
+    production
+    .groupby(["CountyCode", "County"], as_index=False)
+    .agg(
+        total_value=("Value_Dollars", "sum"),
+        total_acres=("HarvestedAcres", "sum")
+    )
+)
+prod_agg["value_per_acre"] = prod_agg["total_value"] / prod_agg["total_acres"]
+
+ins_agg = (
+    insurance
+    .groupby("Location County Code", as_index=False)
+    .agg(
+        total_liability=("Liability Amount", "sum"),
+        total_indemnity=("Indemnity Amount", "sum"),
+        mean_loss_ratio=("Loss Ratio", "mean")
+    )
+    .rename(columns={"Location County Code": "CountyCode"})
+)
+
+vuln = prod_agg.merge(ins_agg, on="CountyCode", how="left")
+
+vuln["coverage_ratio"] = vuln["total_liability"] / vuln["total_value"]
+vuln["total_value_billion"] = vuln["total_value"] / 1e9
+vuln["uninsured_exposure_billion"] = (
+    (vuln["total_value"] - vuln["total_liability"]) / 1e9
+)
+
+vuln["value_per_acre"] = vuln["value_per_acre"].round(0)
+vuln["coverage_ratio"] = vuln["coverage_ratio"].round(4)
+vuln["mean_loss_ratio"] = vuln["mean_loss_ratio"].round(2)
+vuln["total_value_billion"] = vuln["total_value_billion"].round(2)
+vuln["uninsured_exposure_billion"] = vuln["uninsured_exposure_billion"].round(2)
+
+def classify_risk(row):
+    v = row["value_per_acre"]
+    cov = row["coverage_ratio"]
+    lr = row["mean_loss_ratio"]
+    
+    if (v >= 8000) and (cov <= 0.30) and (lr >= 1.05):
+        return "Very High"
+    if (lr >= 1.0) and (v >= 5000):
+        return "High"
+    if (v >= 5000) and (cov < 0.30) and (lr < 1.0):
+        return "Moderate-High"
+    return "Low"
+
+vuln["Risk Profile"] = vuln.apply(classify_risk, axis=1)
+
+counties_tab = ["Napa", "Sonoma", "Lake", "Mendocino", "Fresno", "Madera"]
+summary = (
+    vuln[vuln["County"].isin(counties_tab)]
+    .sort_values("value_per_acre", ascending=False)
+)
+
+def fmt_value_acre(x): return f"${x:,.0f}"
+def fmt_pct(x): return f"{x*100:,.1f}%"
+def fmt_billion(x): return f"${x:,.2f}B"
+def fmt_loss(x): return f"{x:.2f}"
+
+summary_table = pd.DataFrame({
+    "County": summary["County"],
+    "Value per Acre": summary["value_per_acre"].apply(fmt_value_acre),
+    "Coverage Ratio": summary["coverage_ratio"].apply(fmt_pct),
+    "Uninsured Exposure": summary["uninsured_exposure_billion"].apply(fmt_billion),
+    "Mean Loss Ratio": summary["mean_loss_ratio"].apply(fmt_loss),
+    "Risk Profile": summary["Risk Profile"]
+})
+
+summary_table = summary_table.reset_index(drop=True)
+
+summary_table_styled = (
+    summary_table.style
+    .set_table_styles([
+        {"selector": "caption",
+         "props": [
+             ("caption-side", "top"),
+             ("font-size", "14px"),
+             ("font-weight", "bold"),
+             ("text-align", "left"),
+             ("margin-bottom", "6px")
+         ]},
+        {"selector": "th",
+         "props": [
+             ("background-color", "#f5f5f5"),
+             ("font-weight", "bold"),
+             ("text-align", "center"),
+             ("padding", "6px")
+         ]},
+        {"selector": "td",
+         "props": [
+             ("padding", "6px"),
+             ("text-align", "center")
+         ]}
+    ])
+)
+
+summary_table_styled
+
+```
+
+To identify which regions face the greatest financial vulnerability from climate risk, we can combine three dimensions: production value, historical loss ratios, and insurance coverage adequacy (liability as a share of production value). These patterns point to a paradox: the counties with the highest economic value per acre, especially Napa and Sonoma, also exhibit some of the lowest coverage levels, resulting in very large uninsured exposures. Mendocino partly breaks this pattern: despite similarly low coverage and elevated risk, its smaller production base limits the absolute size of its uninsured exposure.
+
+As said, Napa and Sonoma epitomize this pattern. Between 1999 and 2020, Napa generated $11.77 billion in grape production ($12,982 per acre) but insured only 22% of this value, leaving $9.18 billion uninsured. Sonoma produced $10.07 billion ($8,400 per acre) with 29.3% coverage and $7.12 billion uninsured. Together, these two counties account for $16.3 billion in uninsured production value, more than four times the combined uninsured exposure of Fresno and Madera (about $3.77 billion). By contrast, Central Valley grapes in Fresno and Madera are worth around $2,900 per acre, yet Fresno reaches a coverage ratio of 55.2% and Madera 43.0%. Insurance thus provides relatively stronger protection where per-acre stakes are lower, and the weakest protection where they are highest.
+
+This gap is especially concerning because premium wine counties also exhibit the highest historical loss ratios. Lake (1.33), Napa (1.11), and Sonoma (1.08) all exceed 1.0, meaning indemnities have, on average, outpaced premiums over the period, while Mendocino still records an elevated loss ratio of 0.71. By contrast, Central Valley counties remain at or below 0.70, with Fresno at 0.66 and Madera at 0.44. In other words, the areas most prone to insured losses are largely the same regions that carry the largest uninsured exposures, particularly Napa and Sonoma, and, to a lesser extent, Lake.
+The 2020 wildfire season acts as a stress test of this vulnerability structure. Across the study counties, indemnities reached $238.5 million for $30.7 million in premiums (loss ratio 7.77). Napa and Sonoma alone received $200.1 million (83.9% of all indemnities), and including Lake and Mendocino, four premium wine counties absorbed 92.7% of 2020 indemnities. Napa’s 2020 loss ratio of 11.69 and Sonoma’s 11.69 are consistent with, rather than exceptional to, their long-run risk profile. 
+
+Premium wine regions also devote a smaller share of production value to insurance premiums (Napa 0.74%, Sonoma 1.05%) than Central Valley producers (Fresno 2.10%, Madera 1.72%), while receiving larger net indemnities over the sample period. Fresno, for example, pays about $34.5 million more in premiums than it receives in indemnities, effectively cross-subsidizing losses in premium wine counties. Together, these patterns show that Napa, Sonoma, Lake, and Mendocino are the most economically vulnerable regions in the portfolio, combining high production value, elevated climate exposure, and insufficient insurance coverage relative to the value at risk.
+
+**Additional information**
+
+Although we do not present these results here, since they did not lead to clear insights, we also tested several additional approaches during the exploratory phase. We examined linear correlations between weather variables, production, and insurance outcomes, but Pearson coefficients showed weak or inconsistent relationships. We then explored one-year lag effects to see whether weather conditions in a given year might influence production or loss ratios in the following year. We also checked whether outliers could be responsible for the lack of clear patterns, testing the impact of excluding extreme values. Finally, we experimented with potential nonlinear associations, given that simple linear correlations did not capture meaningful relationships.
+
+# Conclusion
+
+This study examined how climate variability, grape production and crop insurance interact in California’s wine sector using a county-level panel for 16 major producing regions between 1999 and 2020. By combining climate indicators, insurance records and economic measures of production, we showed that climate-related risk in viticulture is highly heterogeneous across space and only partially internalised by the current insurance system.
+
+Our results first highlight that Californian wine counties fall into distinct climatic regimes rather than a single continuum of risk. Most insured vineyards still operate within temperature ranges that are physiologically suitable for Vitis vinifera, but a group of hot and dry counties already lies close to critical thresholds, where additional warming is associated with declining production and higher insurance losses. Drought indicators show recurrent periods of severe water stress across the state, yet their economic impact depends crucially on local water-resource geography and infrastructure rather than on climate alone.
+
+Second, the 2012–2016 drought reveals that climate shocks can trigger structural shifts rather than uniform declines in output. Groundwater-dependent counties in the Tulare Basin experienced marked and persistent reductions in grape production, while most other major grape counties expanded. This divergence reflects the interaction of drought with water availability: regions relying solely on depleted aquifers were forced to contract, whereas those with access to rivers or aqueducts could stabilise or grow. At the same time, production shifted away from lower-value grapes in groundwater-stressed areas toward higher-value wine grapes in water-secure regions, reshaping where and which grapes are grown.
+
+Third, crop insurance only partly tracks these risk patterns. Premiums increase gradually and tend to scale with insured liability and production rather than with climate indicators, while indemnities spike in a few extreme years such as 2014 and especially 2020, when drought, wildfire and other stressors likely coincided. Climate-sensitive pricing is clearly visible only in the hottest, driest cluster; elsewhere, premiums respond more to output than to hazard intensity. When we integrate production value, coverage ratios and historical loss ratios, the counties that appear most financially vulnerable are premium wine regions such as Napa, Sonoma, Lake and Mendocino: they combine very high value per acre and elevated loss experience with relatively low insurance coverage, leaving large uninsured exposures.
+
+In contrast, Central Valley producers cultivate lower-value grapes, face lower loss ratios and insure a larger share of their production value, often paying more in premiums than they receive in indemnities. In effect, they help to cross-subsidise losses in premium wine regions. Taken together, these findings suggest that as climate extremes intensify, effective risk management in Californian viticulture will require not only better modelling of weather and fire risk, but also an insurance design that more explicitly reflects regional water-resource constraints and the concentration of economic value at risk.
+
+# Appendix
+
+In this appendix we report the main code used in the project.
+
+## Data preparation 
+
+**Weather dataset**
+
+```{python}
+#| code-fold: true
+#| eval: false
+
+import requests
+import pandas as pd
+import time
+
+ca_counties = [
+    'CA-001', 'CA-003', 'CA-005', 'CA-007', 'CA-009', 'CA-011', 'CA-013', 'CA-015',
+    'CA-017', 'CA-019', 'CA-021', 'CA-023', 'CA-025', 'CA-027', 'CA-029', 'CA-031',
+    'CA-033', 'CA-035', 'CA-037', 'CA-039', 'CA-041', 'CA-043', 'CA-045', 'CA-047',
+    'CA-049', 'CA-051', 'CA-053', 'CA-055', 'CA-057', 'CA-059', 'CA-061', 'CA-063',
+    'CA-065', 'CA-067', 'CA-069', 'CA-071', 'CA-073', 'CA-075', 'CA-077', 'CA-079',
+    'CA-081', 'CA-083', 'CA-085', 'CA-087', 'CA-089', 'CA-091', 'CA-093', 'CA-095',
+    'CA-097', 'CA-099', 'CA-101', 'CA-103', 'CA-105', 'CA-107', 'CA-109', 'CA-111',
+    'CA-113', 'CA-115'
+]
+
+parameters = {
+    'tavg': 'avg_temp',
+    'tmax': 'max_temp',
+    'tmin': 'min_temp',
+    'pcp': 'precipitation',
+    'pdsi': 'drought_severity_index',
+    'zndx': 'palmer_z_index'
+}
+
+base_url = "https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/county/time-series"
+
+all_data = []
+
+for county in ca_counties:
+    print(f"ok {county}")
+
+    for param_code, param_name in parameters.items():
+        url = f"{base_url}/{county}/{param_code}/1/0/1999-2020/data.csv"
+
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+
+            lines = response.text.strip().split('\n')
+            data_lines = [line for line in lines if not line.startswith('#') and line.strip()]
+
+            for line in data_lines[1:]:
+                parts = line.split(',')
+                if len(parts) >= 2:
+                    date_str = parts[0]
+                    value = parts[1]
+
+                    all_data.append({
+                        'County_Code': county,
+                        'Date': date_str,
+                        'Parameter': param_name,
+                        'Value': value
+                    })
+
+            time.sleep(0.5)
+
+        except Exception as e:
+            print(f"  error {county} {param_code}: {e}")
+
+print("ok saving")
+df = pd.DataFrame(all_data)
+df.to_csv('california_climate_1999_2020.csv', index=False)
+
+print(f"done - {len(df):,} records")
+
+import pandas as pd
+
+df = pd.read_csv("california_climate_1999_2020.csv")
+
+print("Before cleaning:")
+print(df.head())
+
+df['Location County Code'] = df['County_Code'].str.extract(r'(\d+)').astype(int)
+
+df['Commodity Year'] = df['Date'].astype(str).str[:4]
+df['Month'] = df['Date'].astype(str).str[4:6].astype(int)
+
+df = df.drop(['County_Code', 'Date'], axis=1)
+
+print("\nAfter cleaning:")
+print(df.head())
+
+insurance_data = pd.read_csv('insurance_1999_2020.csv')
+print("Insurance county codes:", sorted(insurance_data['Location County Code'].unique()))
+county_map = insurance_data[['Location County Code', 'Location County Name']].drop_duplicates()
+df = df.merge(county_map, on='Location County Code', how='left')
+
+df = df[df['Location County Name'].notna()]
+
+print("Climate county codes:", sorted(df['Location County Code'].unique()))
+df.to_csv("county_weather_cleaned.csv", index=False)
+print("\n Saved cleaned file as county_weather_cleaned.csv")
+
+
+import pandas as pd
+
+
+
+weather_monthly = pd.read_csv("county_weather_cleaned.csv")
+
+weather_monthly["County"] = weather_monthly["Location County Name"].str.strip()
+weather_monthly["CountyCode"] = weather_monthly["Location County Code"]
+weather_monthly["Year"] = weather_monthly["Commodity Year"]
+
+weather_annual = weather_monthly.pivot_table(
+    index=["County", "CountyCode", "Year"],
+    columns="Parameter",
+    values="Value",
+    aggfunc="mean"
+).reset_index()
+
+weather_annual = weather_annual[
+    [
+        "County",
+        "CountyCode",
+        "Year",
+        "avg_temp",
+        "max_temp",
+        "min_temp",
+        "precipitation",
+        "drought_severity_index",
+        "palmer_z_index"
+    ]
+]
+
+weather_annual.to_csv("weather_by_year.csv")
+
+```
+
+**Production dataset**
+
+```{python}
+#| code-fold: true
+#| eval: false
+
+import pandas as pd
+import numpy as np
+
+wine = pd.read_csv('Californa_Wine_Production_1980_2020.csv')
+print(f"Loaded {len(wine):,} rows, {wine['County'].nunique()} counties ({wine['Year'].min()}-{wine['Year'].max()})")
+
+original_rows = len(wine)
+wine_clean = wine.dropna(subset=['County', 'Value(Dollars)', 'HarvestedAcres', 'Production'])
+wine_clean = wine_clean[
+    (wine_clean['Value(Dollars)'] > 0) &
+    (wine_clean['HarvestedAcres'] > 0) &
+    (wine_clean['Production'] > 0)
+]
+
+wine_clean['Value_Per_Production'] = wine_clean['Value(Dollars)'] / wine_clean['Production']
+wine_clean = wine_clean[wine_clean['Value_Per_Production'] <= 100000]
+wine_clean = wine_clean.drop('Value_Per_Production', axis=1)
+
+
+county_totals = wine_clean.groupby('County')['Value(Dollars)'].sum().reset_index()
+county_totals.columns = ['County', 'Total_Value']
+county_totals = county_totals.sort_values('Total_Value', ascending=False)
+
+total_value = county_totals['Total_Value'].sum()
+county_totals['Percentage'] = (county_totals['Total_Value'] / total_value * 100)
+county_totals['Cumulative_Pct'] = county_totals['Percentage'].cumsum()
+
+top90 = county_totals[county_totals['Cumulative_Pct'] <= 90].copy()
+
+requested_counties = [
+    'Madera', 'Fresno', 'Tulare', 'Stanislaus', 'SanJoaquin',
+    'Merced', 'Kings', 'Kern', 'Sacramento', 'Lake',
+    'Sonoma', 'Yolo', 'Solano', 'Monterey', 'Napa',
+    'SanLuisObispo', 'ElDorado', 'Mendocino', 'Riverside',
+    'SanBenito', 'SantaBarbara', 'Colusa', 'ContraCosta'
+]
+
+all_counties = list(set(top90['County'].tolist() + requested_counties))
+
+wine_final = wine_clean[wine_clean['County'].isin(all_counties)].copy()
+wine_final = wine_final[(wine_final['Year'] >= 1999) & (wine_final['Year'] <= 2020)]
+wine_final = wine_final[wine_final['County'] != 'SanBenito']
+wine_final = wine_final.sort_values(['Year', 'County'])
+
+print(f"Output: {len(wine_final):,} rows, {wine_final['County'].nunique()} counties (1999-2020)")
+
+wine_final.to_csv('production_step1_cleaned.csv', index=False)
+county_totals.to_csv('county_ranking.csv', index=False)
+
+import pandas as pd
+import numpy as np
+
+wine = pd.read_csv('Californa_Wine_Production_1980_2020.csv')
+print(f"Loaded {len(wine):,} rows from {wine['Year'].min()}-{wine['Year'].max()}")
+print(f"Counties: {wine['County'].nunique()}")
+
+original_rows = len(wine)
+wine_clean = wine.dropna(subset=['County', 'Value(Dollars)', 'HarvestedAcres', 'Production'])
+print(f"Removed {original_rows - len(wine_clean)} rows with missing data")
+
+before = len(wine_clean)
+wine_clean = wine_clean[
+    (wine_clean['Value(Dollars)'] > 0) &
+    (wine_clean['HarvestedAcres'] > 0) &
+    (wine_clean['Production'] > 0)
+]
+print(f"Removed {before - len(wine_clean)} rows with invalid values")
+
+wine_clean['Value_Per_Production'] = wine_clean['Value(Dollars)'] / wine_clean['Production']
+impossible = wine_clean['Value_Per_Production'] > 100000
+
+print(impossible)
+wine_clean = wine_clean.drop('Value_Per_Production', axis=1)
+
+print(f"Cleaned data: {len(wine_clean):,} rows ({len(wine_clean)/original_rows*100:.1f}% retained)")
+
+final_16_counties = [
+    'ElDorado', 'Fresno', 'Kern', 'Kings', 'Lake', 'Madera',
+    'Mendocino', 'Merced', 'Napa', 'Riverside', 'Sacramento',
+    'SanJoaquin', 'Solano', 'Sonoma', 'Tulare', 'Yolo'
+]
+
+wine_final = wine_clean[wine_clean['County'].isin(final_16_counties)].copy()
+wine_final = wine_final[(wine_final['Year'] >= 1999) & (wine_final['Year'] <= 2020)]
+
+wine_final = wine_final.rename(columns={
+    'Year': 'Commodity Year',
+    'CountyCode': 'Location County Code',
+    'County': 'Location County Name',
+    'HarvestedAcres': 'Harvested Acres',
+    'Yield(Unit/Acre)': 'Yield Per Acre',
+    'Price(Dollars/Unit)': 'Price Per Unit',
+    'Value(Dollars)': 'Value Dollars'
+})
+
+wine_final = wine_final.drop(['CropName', 'CommodityCode'], axis=1, errors='ignore')
+
+wine_final = wine_final.sort_values(['Commodity Year', 'Location County Name'])
+
+print(f"Final dataset: {len(wine_final):,} rows, {wine_final['Location County Name'].nunique()} counties (16 with complete data)")
+
+wine_final.to_csv('production_1999_2020_final_16counties.csv', index=False)
+print("Saved: production_1999_2020_final_16counties.csv") # final name: production_1999_2020.csv
+
+years_per_county = wine_final.groupby('Location County Name')['Commodity Year'].nunique()
+print("\nYears per county:")
+print(years_per_county)
+if (years_per_county == 22).all():
+    print("✓ All 16 counties have complete 22-year data")
+
+```
+
+**Insurance dataset**
+
+```{python}
+#| code-fold: true
+#| eval: false
+
+import pandas as pd
+import os
+
+column_names = [
+    'Commodity Year', 'Location State Code', 'Location State Abbreviation',
+    'Location County Code', 'Location County Name', 'Commodity Code',
+    'Commodity Name', 'Insurance Plan Code', 'Insurance Plan Name Abbreviation',
+    'Coverage Category', 'Delivery Type', 'Coverage Level',
+    'Policies Sold Count', 'Policies Earning Premium Count',
+    'Policies Indemnified Count', 'Units Earning Premium Count',
+    'Units Indemnified Count', 'Quantity Type', 'Net Reported Quantity',
+    'Endorsed/Companion Acres', 'Liability Amount', 'Total Premium Amount',
+    'Subsidy Amount', 'State/Private Subsidy', 'Additional Subsidy',
+    'EFA Premium Discount', 'Indemnity Amount', 'Loss Ratio'
+]
+
+all_data = []
+
+for year in range(1999, 2021):
+    filename = f"{year}.txt"
+    if os.path.exists(filename):
+        df = pd.read_csv(filename, sep='|', dtype=str, header=None,
+                        names=column_names, on_bad_lines='skip')
+        all_data.append(df)
+
+combined_df = pd.concat(all_data, ignore_index=True)
+
+ca_data = combined_df[combined_df['Location State Abbreviation'].str.strip() == 'CA']
+ca_data = ca_data[ca_data['Location County Code'].str.strip() != '999']
+ca_data = ca_data[ca_data['Commodity Name'].str.strip().str.upper() == 'GRAPES']
+
+ca_data['Commodity Year'] = pd.to_numeric(ca_data['Commodity Year'], errors='coerce')
+ca_data['Location County Code'] = ca_data['Location County Code'].str.strip()
+
+numeric_cols = [
+    'Policies Sold Count', 'Policies Earning Premium Count',
+    'Policies Indemnified Count', 'Units Earning Premium Count',
+    'Units Indemnified Count', 'Net Reported Quantity',
+    'Endorsed/Companion Acres', 'Liability Amount', 'Total Premium Amount',
+    'Subsidy Amount', 'State/Private Subsidy', 'Additional Subsidy',
+    'EFA Premium Discount', 'Indemnity Amount', 'Loss Ratio'
+]
+
+for col in numeric_cols:
+    ca_data[col] = pd.to_numeric(ca_data[col], errors='coerce')
+
+agg_dict = {col: ('mean' if col == 'Loss Ratio' else 'sum') for col in numeric_cols}
+agg_dict['Location County Name'] = 'first'
+
+grape_data = ca_data.groupby(['Location County Code', 'Commodity Year']).agg(agg_dict).reset_index()
+grape_data = grape_data.sort_values(['Location County Code', 'Commodity Year'])
+
+years_by_county = grape_data.groupby('Location County Code').agg({
+    'Commodity Year': 'count',
+    'Location County Name': 'first',
+    'Liability Amount': 'sum'
+}).reset_index()
+
+years_by_county.columns = ['County_Code', 'Years_Count', 'County_Name', 'Total_Liability']
+years_by_county = years_by_county.sort_values('Total_Liability', ascending=False)
+
+grape_data.to_csv('california_grapes_1999_2020.csv', index=False)
+years_by_county.to_csv('grape_counties_summary.csv', index=False)
+
+print(f"Processed {len(grape_data):,} records, {len(years_by_county)} counties")
+print("Saved: california_grapes_1999_2020.csv") # final name: production_1999_2020.csv
+print("Saved: grape_counties_summary.csv")
+
+```
+
+## Cluster analysis
+
+```{python}
+#| code-fold: true
+#| eval: false
+
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+
+insurance = pd.read_csv('/content/insurance_clean.csv')
+insurance['Location County Name'] = insurance['Location County Name'].str.strip()
+
+production = pd.read_excel('/content/production.xlsx')
+for col in ['Production', 'Price_Per_Unit', 'Value_Dollars', 'HarvestedAcres']:
+    production[col] = pd.to_numeric(production[col], errors='coerce')
+
+weather = pd.read_csv('/content/weather.csv')
+weather['Location County Name'] = weather['Location County Name'].str.strip()
+
+insurance['County_Match'] = insurance['Location County Name'].str.replace(' ', '').str.upper()
+production['County_Match'] = production['County'].str.replace(' ', '').str.upper()
+
+merged = insurance.merge(
+    production[['Year', 'County_Match', 'Production', 'Price_Per_Unit', 'HarvestedAcres', 'Value_Dollars']],
+    left_on=['Commodity Year', 'County_Match'],
+    right_on=['Year', 'County_Match'],
+    how='inner'
+)
+
+print(f"Merged dataset: {len(merged)} records")
+
+weather_pivot = weather.pivot_table(
+    index='Location County Name',
+    columns='Parameter',
+    values='Value',
+    aggfunc='mean'
+).reset_index()
+
+insurance_counties = insurance['Location County Name'].unique()
+weather_clusterable = weather_pivot[weather_pivot['Location County Name'].isin(insurance_counties)].copy()
+
+features = ['avg_temp', 'max_temp', 'min_temp', 'precipitation', 'drought_severity_index', 'palmer_z_index']
+X = weather_clusterable[features].values
+X_scaled = StandardScaler().fit_transform(X)
+
+kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
+weather_clusterable['Cluster'] = kmeans.fit_predict(X_scaled)
+
+weather_clusterable['County_Match'] = weather_clusterable['Location County Name'].str.replace(' ', '').str.upper()
+merged = merged.merge(
+    weather_clusterable[['County_Match', 'Cluster'] + features],
+    on='County_Match',
+    how='left'
+)
+
+print(f"Added clusters: {merged['Cluster'].notna().sum()} records")
+
+merged.to_csv('complete_dataset.csv', index=False)
+print("Saved: complete_dataset.csv")
+
+print("JSHJDAHJSDH ok")
+for c in range(4):
+    data = merged[merged['Cluster'] == c]
+    print(f"Cluster {c}: {list(data['Location County Name'].unique())}")
+    print(f"  Avg Loss Ratio: {data['Loss Ratio'].mean():.1%}")
+    print(f"  Avg Production: {data['Production'].mean():,.0f} tons")
+    print(f"  Avg Premium: ${data['Price_Per_Unit'].mean():,.0f}/ton")
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+
+merged = pd.read_csv('complete_dataset.csv')
+
+
+vars = ['Loss Ratio', 'Indemnity Amount', 'Production', 'Price_Per_Unit',
+        'avg_temp', 'precipitation', 'drought_severity_index']
+
+labels = ['Loss\nRatio', 'Indemnity\n($)', 'Production\n(tons)', 'Premium\n($/ton)',
+          'Temp\n(°F)', 'Precip\n(in)', 'Drought\nIndex']
+
+fig, axes = plt.subplots(2, 2, figsize=(20, 18))
+axes = axes.flatten()
+
+colors = ['#e74c3c', '#f39c12', '#e67e22', '#3498db']
+names = ['Central Valley', 'Warm Interior', 'Hot & Dry', 'Cool Wine Regions']
+
+for cluster_id in range(4):
+    cluster_data = merged[merged['Cluster'] == cluster_id][vars].copy()
+    corr = cluster_data.corr()
+    mask = np.triu(np.ones_like(corr, dtype=bool))
+
+    ax = axes[cluster_id]
+    sns.heatmap(corr, mask=mask, annot=True, fmt='.2f', cmap='RdBu_r', center=0,
+                square=True, linewidths=2, vmin=-1, vmax=1, ax=ax,
+                xticklabels=labels, yticklabels=labels,
+                annot_kws={'size': 10, 'weight': 'bold'})
+
+    ax.set_title(f'Cluster {cluster_id}: {names[cluster_id]}',
+                fontsize=13, fontweight='bold', pad=20,
+                bbox=dict(boxstyle='round,pad=0.5', facecolor=colors[cluster_id], alpha=0.3))
+
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right', fontsize=11, weight='bold')
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=11, weight='bold')
+
+    corr.to_csv(f'correlation_cluster_{cluster_id}.csv')
+
+fig.suptitle('Correlation Analysis by Climate Cluster\nInsurance × Production × Premium × Climate',
+            fontsize=18, fontweight='bold')
+plt.tight_layout()
+plt.savefig('correlation_by_cluster.png', dpi=300, bbox_inches='tight')
+print("✓ Saved: correlation_by_cluster.png")
+
+
+
+fig2, axes2 = plt.subplots(1, 4, figsize=(24, 6))
+
+key_pairs = [
+    ('Loss Ratio', 'avg_temp', 'Loss Ratio\nvs\nTemp'),
+    ('Loss Ratio', 'precipitation', 'Loss Ratio\nvs\nPrecip'),
+    ('Production', 'avg_temp', 'Production\nvs\nTemp'),
+    ('Price_Per_Unit', 'avg_temp', 'Premium\nvs\nTemp'),
+]
+
+comparison_matrix = np.zeros((4, len(key_pairs)))
+
+for cluster_id in range(4):
+    cluster_data = merged[merged['Cluster'] == cluster_id][vars].copy()
+    corr = cluster_data.corr()
+
+    for j, (var1, var2, label) in enumerate(key_pairs):
+        if var1 in corr.index and var2 in corr.columns:
+            comparison_matrix[cluster_id, j] = corr.loc[var1, var2]
+
+for j, (var1, var2, label) in enumerate(key_pairs):
+    ax = axes2[j]
+
+    values = comparison_matrix[:, j]
+    cluster_names = [f"C{i}: {names[i]}" for i in range(4)]
+
+    bars = ax.barh(range(4), values, color=colors, alpha=0.7, edgecolor='black', linewidth=2)
+    ax.set_yticks(range(4))
+    ax.set_yticklabels(cluster_names, fontsize=10, weight='bold')
+    ax.set_xlabel('Correlation', fontsize=11, fontweight='bold')
+    ax.set_title(label, fontsize=12, fontweight='bold', pad=10)
+    ax.axvline(x=0, color='black', linestyle='-', linewidth=1)
+    ax.set_xlim(-1, 1)
+    ax.grid(axis='x', alpha=0.3)
+
+    for i, (bar, val) in enumerate(zip(bars, values)):
+        x_pos = val + (0.05 if val > 0 else -0.05)
+        ha = 'left' if val > 0 else 'right'
+        ax.text(x_pos, i, f'{val:.2f}', ha=ha, va='center',
+               fontsize=10, fontweight='bold')
+
+plt.suptitle('Key Correlation Comparison Across Clusters',
+            fontsize=16, fontweight='bold')
+plt.tight_layout()
+plt.savefig('correlation_comparison.png', dpi=300, bbox_inches='tight')
+print("Saved: correlation_comparison.png")
+
+import pandas as pd
+import matplotlib.pyplot as plt
+
+merged = pd.read_csv('complete_dataset.csv')
+
+drought_impact = []
+
+for county in merged['Location County Name'].unique():
+    data = merged[merged['Location County Name'] == county]
+    print("avant 2012")
+    pre_drought = data[data['Year'] < 2012]['Production'].mean()
+
+    during_drought = data[(data['Year'] >= 2012) & (data['Year'] <= 2016)]['Production'].mean()
+
+    if pre_drought > 0:
+        change = ((during_drought - pre_drought) / pre_drought) * 100
+
+        drought_impact.append({
+            'County': county,
+            'Cluster': data['Cluster'].iloc[0],
+            'Change_%': change
+        })
+
+df = pd.DataFrame(drought_impact).sort_values('Change_%')
+
+fig, ax = plt.subplots(figsize=(12, 10))
+
+cluster_colors = {0: '#e74c3c', 1: '#f39c12', 2: '#e67e22', 3: '#3498db'}
+cluster_names = {0: 'Central Valley', 1: 'Warm Interior', 2: 'Hot & Dry', 3: 'Cool Wine'}
+
+colors = [cluster_colors[int(c)] for c in df['Cluster']]
+
+bars = ax.barh(range(len(df)), df['Change_%'], color=colors,
+              edgecolor='black', linewidth=2.5, alpha=0.85)
+
+ax.set_yticks(range(len(df)))
+ax.set_yticklabels(df['County'], fontsize=12, fontweight='bold')
+ax.set_xlabel('Production Change (%)', fontsize=14, fontweight='bold')
+ax.set_title('Drought Impact 2012-2016', fontsize=16, fontweight='bold', pad=20)
+
+ax.axvline(x=0, color='black', linewidth=3)
+
+ax.grid(axis='x', alpha=0.4, linewidth=1.2)
+
+min_val = df['Change_%'].min()
+max_val = df['Change_%'].max()
+padding = max(abs(min_val), abs(max_val)) * 0.15
+ax.set_xlim(min_val - padding, max_val + padding)
+
+for i, (bar, val) in enumerate(zip(bars, df['Change_%'])):
+    x_pos = val + (-2.5 if val < 0 else 2.5)
+    print(x_pos)
+    print(val + -3 if val < 0 else 3)
+    ha = 'right' if val < 0 else 'left'
+    ax.text(x_pos, i, f'{val:.1f}%', ha=ha, va='center',
+           fontsize=11, fontweight='bold')
+
+from matplotlib.patches import Patch
+legend = [Patch(facecolor=cluster_colors[i], edgecolor='black', linewidth=2,
+               label=f'C{i}: {cluster_names[i]}') for i in range(4)]
+ax.legend(handles=legend, loc='lower right', fontsize=11,
+         title='Climate Clusters', title_fontsize=12)
+
+plt.tight_layout()
+plt.savefig('drought_impact_2012_2016.png', dpi=300, bbox_inches='tight')
+print("Graph saved: drought_impact_2012_2016.png")
+
+```
+
+
+# References
+
+::: {#refs}
+:::
+
+---
