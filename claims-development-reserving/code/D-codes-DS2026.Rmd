@@ -1,0 +1,2109 @@
+---
+title: "Data Science for Non-Life Insurance"
+author: "Alexiane Bölcs, Milla Campajola, Stefan Upeski"
+date: "07 May 2026"
+output: html_document
+---
+
+# Claims Development and Reserving
+
+```{r setup, include=FALSE}
+suppressPackageStartupMessages({
+  library(readxl)       
+  library(dplyr)    
+  library(tidyr)        
+  library(purrr)   
+  library(ggplot2)      
+  library(scales)       
+  library(randomForest) 
+  library(survival)     
+})
+
+theme_set(theme_minimal(base_size = 11))
+options(scipen = 999)
+
+set.seed(42) 
+
+# Directory for saved figures
+dir.create("figs", showWarnings = FALSE)
+```
+
+## Data load and sanity check
+
+```{r load, echo=TRUE}
+path_data <- "main_data_groupD.xlsx"
+claims <- read_excel(path_data) %>%
+  mutate(
+    Acc_Yr               = as.integer(Acc_Yr),
+    Rpt_Yr_Lag           = as.integer(Rpt_Yr_Lag),
+    claim_num            = as.character(claim_num),
+    Dev_Yr               = as.integer(Dev_Yr),
+    Cal_Yr               = as.integer(Cal_Yr),
+    open_ind             = as.integer(open_ind),
+    Accum_Infl_Index_Mid = as.numeric(Accum_Infl_Index_Mid),
+    Incr_Payment         = as.numeric(Incr_Payment),
+    Acc_Incr_Payment     = as.numeric(Acc_Incr_Payment)
+  )
+
+stopifnot(all(claims$Cal_Yr == claims$Acc_Yr + claims$Dev_Yr - 1))
+stopifnot(!anyNA(claims))
+
+cat(sprintf("Rows: %d | Claims: %d | AY: %d-%d | Dev_Yr: 1-%d\n",
+            nrow(claims), n_distinct(claims$claim_num),
+            min(claims$Acc_Yr), max(claims$Acc_Yr),
+            max(claims$Dev_Yr)))
+
+max_dev     <- max(claims$Dev_Yr)
+max_cal     <- max(claims$Cal_Yr)
+max_obs_cal <- max_cal                       # used in IBNR/RF sections
+ay_range    <- sort(unique(claims$Acc_Yr))
+```
+
+The overall aim is to project reserves for the accident year 2009-2023.
+
+# Task 2
+
+### Exploratory Data Analysis
+
+```{r EDA, echo=TRUE}
+# 1. Reporting-delay distribution
+p_delay <- claims %>%
+  distinct(claim_num, Rpt_Yr_Lag) %>%
+  count(Rpt_Yr_Lag) %>%
+  mutate(pct = 100 * n / sum(n)) %>%
+  ggplot(aes(factor(Rpt_Yr_Lag), pct)) +
+  geom_col(fill = "darkorange") +
+  geom_text(aes(label = sprintf("%.1f%%", pct)), vjust = -0.3, size = 3) +
+  labs(title = "Reporting Delay Distribution",
+       x = "Rpt_Yr_Lag", y = "% of claims")
+
+ggsave("figs/reporting_delay.pdf", p_delay, width = 6, height = 4)
+print(p_delay)
+
+# 2. Incremental triangle heatmap
+triangle_incr <- claims %>%
+  group_by(Acc_Yr, Dev_Yr) %>%
+  summarise(S = sum(Incr_Payment, na.rm = TRUE), .groups = "drop")
+
+p_heat <- triangle_incr %>%
+  ggplot(aes(factor(Dev_Yr), factor(Acc_Yr), fill = S / 1e6)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "C", labels = comma) +
+  scale_y_discrete(limits = rev) +
+  labs(title = "Incremental Claims Triangle (USD millions)",
+       x = "Development Year", y = "Accident Year", fill = "M")
+
+ggsave("figs/triangle_heatmap.pdf", p_heat, width = 7, height = 5)
+print(p_heat)
+
+# 3. Claim super-inflation
+# Log-linear regression of median deflated payment on calendar year
+# The slope (in log units per year) tells us the residual trend above
+p_super <- claims %>%
+  filter(Incr_Payment > 0) %>%
+  mutate(defl = Incr_Payment / Accum_Infl_Index_Mid) %>%
+  group_by(Cal_Yr) %>%
+  summarise(mean_d = mean(defl), med_d = median(defl), .groups = "drop") %>%
+  pivot_longer(-Cal_Yr, names_to = "stat", values_to = "val") %>%
+  ggplot(aes(Cal_Yr, val, color = stat)) +
+  geom_line(linewidth = 1) + geom_point() +
+  scale_y_log10(labels = comma) +
+  labs(title = "Deflated payments by calendar year",
+       subtitle = "Upward slope = claim super-inflation above general index",
+       y = "Deflated payment (log scale, USD)", x = "Calendar Year")
+
+ggsave("figs/deflated_trend.pdf", p_super, width = 6, height = 4)
+print(p_super)
+
+# Formal estimate: log-linear regression on median deflated payment
+super_fit <- claims %>%
+  filter(Incr_Payment > 0) %>%
+  mutate(defl = Incr_Payment / Accum_Infl_Index_Mid) %>%
+  group_by(Cal_Yr) %>%
+  summarise(med = median(defl), .groups = "drop") %>%
+  mutate(log_med = log(med)) %>%
+  { lm(log_med ~ Cal_Yr, data = .) }
+
+# g_log is the log-rate (coefficient from lm); report it as-is
+g_log <- coef(super_fit)[["Cal_Yr"]]
+cat(sprintf("Claim super-inflation (log-linear on median): %+.2f%% /yr, R2=%.3f\n",
+            100 * g_log, summary(super_fit)$r.squared))
+
+# 4. Claim-size distribution (positive payments)
+# We use log10 so the heavy upper tail is visible
+pos_pay <- claims %>%
+  filter(Incr_Payment > 0) %>%
+  mutate(log10_pay = log10(Incr_Payment))
+
+q_med <- median(pos_pay$Incr_Payment)
+q_99  <- quantile(pos_pay$Incr_Payment, 0.99)
+share_below_1k <- mean(pos_pay$Incr_Payment < 1000)
+
+cat(sprintf("\nPositive payments: median = %s USD, 99th pct = %s USD\n",
+            format(round(q_med), big.mark = ","),
+            format(round(q_99), big.mark = ",")))
+cat(sprintf("Share of positive payments below 1,000 USD: %.1f%%\n",
+            100 * share_below_1k))
+cat(sprintf("Share of TOTAL dollars from top 1%% of payments: %.1f%%\n",
+            100 * sum(pos_pay$Incr_Payment[pos_pay$Incr_Payment >= q_99]) /
+              sum(pos_pay$Incr_Payment)))
+p_size <- pos_pay %>%
+  ggplot(aes(log10_pay)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 60,
+                 fill = "#3498db", color = "white", alpha = 0.85) +
+  geom_density(color = "#1b4f72", linewidth = 0.8) +
+  geom_vline(xintercept = log10(q_med), linetype = "dashed",
+             color = "#c0392b", linewidth = 0.8) +
+  geom_vline(xintercept = log10(q_99),  linetype = "dashed",
+             color = "#27ae60", linewidth = 0.8) +
+  annotate("text", x = log10(q_med), y = Inf, vjust = 1.3, hjust = -0.05,
+           label = sprintf("median\n%s", format(round(q_med), big.mark = ",")),
+           color = "#c0392b", size = 3) +
+  annotate("text", x = log10(q_99),  y = Inf, vjust = 1.3, hjust = -0.05,
+           label = sprintf("99th pct\n%s", format(round(q_99), big.mark = ",")),
+           color = "#27ae60", size = 3) +
+  scale_x_continuous(breaks = 0:7,
+                     labels = c("$1", "$10", "$100", "$1k", "$10k",
+                                "$100k", "$1M", "$10M")) +
+  labs(title = "Distribution of positive incremental payments (log10 scale)",
+       subtitle = "Long right tail: top 1% of payments drive a large fraction of total volume",
+       x = "Payment amount (log10 USD)", y = "Density")
+ggsave("figs/claim_size.pdf", p_size, width = 7, height = 4)
+print(p_size)
+
+# 5. Severity by Accident Year (nominal vs deflated)
+# Mean positive payment per claim by accident year, both NOMINAL and DEFLATED
+# We aggregate by accident year (not by calendar year) so each bar
+# represents the average severity of claims OCCURRED in that year
+sev_by_ay <- claims %>%
+  filter(Incr_Payment > 0) %>%
+  mutate(defl = Incr_Payment / Accum_Infl_Index_Mid) %>%
+  group_by(Acc_Yr) %>%
+  summarise(
+    n_pay   = n(),
+    mean_nom = mean(Incr_Payment),
+    mean_def = mean(defl),
+    .groups = "drop"
+  )
+cat("\nMean positive payment per accident year:\n")
+print(sev_by_ay %>% mutate(mean_nom = round(mean_nom),
+                           mean_def = round(mean_def)))
+p_sev_ay <- sev_by_ay %>%
+  select(Acc_Yr,
+         "Nominal (USD)"            = mean_nom,
+         "Deflated (USD, real)"     = mean_def) %>%
+  pivot_longer(-Acc_Yr, names_to = "Type", values_to = "Severity") %>%
+  ggplot(aes(factor(Acc_Yr), Severity, fill = Type)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("Nominal (USD)"        = "#1b4f72",
+                               "Deflated (USD, real)" = "#e67e22")) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Mean positive payment by accident year — nominal vs deflated",
+       subtitle = "Gap between bars = general inflation; 
+       trend in orange = real-terms claim severity",
+       x = "Accident Year", y = "Mean payment (USD)") +
+  theme(legend.position = "bottom")
+ggsave("figs/fig5_severity_by_ay.pdf", p_sev_ay, width = 7, height = 4)
+print(p_sev_ay)
+
+# 6. Closure dynamics by accident year
+# Share of claims still open at the end of each development year, by
+# accident year cohort. We restrict to mature cohorts (Acc_Yr <= 2015)
+# so that the curves can be observed up to Dev_Yr ~ 8-15 without
+# right-censoring biasing the picture
+mature_ay <- 2009:2015
+closure_curves <- claims %>%
+  filter(Acc_Yr %in% mature_ay) %>%
+  group_by(Acc_Yr, Dev_Yr) %>%
+  summarise(open_share = mean(open_ind == 1), .groups = "drop")
+
+p_closure <- closure_curves %>%
+  ggplot(aes(Dev_Yr, 100 * open_share, color = factor(Acc_Yr))) +
+  geom_line(linewidth = 0.8) + geom_point(size = 1.5) +
+  scale_x_continuous(breaks = 1:max_dev) +
+  scale_color_viridis_d(option = "D", end = 0.9) +
+  labs(title = "Share of claims still OPEN by development year (mature cohorts)",
+       subtitle = "AYs 2009-2015: motivates the survival/Cox correction in Section 10",
+       x = "Development Year",
+       y = "% of claims still open",
+       color = "Accident Year") +
+  theme(legend.position = "right")
+ggsave("figs/fig6_closure_curves.pdf", p_closure, width = 7, height = 4)
+print(p_closure)
+```
+
+# Task 1
+
+## Chain Ladder Unadjusted
+
+```{r CL unadjusted, echo=TRUE}
+# Build full Acc_Yr × Dev_Yr rectangle
+# obs = TRUE for cells we actually observe (Cal_Yr <= max_cal = 2023)
+triangle_full <- expand_grid(Acc_Yr = ay_range, Dev_Yr = 1:max_dev) %>%
+  mutate(Cal_Yr = Acc_Yr + Dev_Yr - 1,
+         obs    = Cal_Yr <= max_cal) %>%
+  left_join(triangle_incr, by = c("Acc_Yr", "Dev_Yr")) %>%
+  mutate(S = ifelse(obs, replace_na(S, 0), NA_real_))
+
+# Cumulative triangle (within observed cells only)
+triangle_cum <- triangle_full %>%
+  group_by(Acc_Yr) %>% arrange(Dev_Yr, .by_group = TRUE) %>%
+  mutate(C = ifelse(obs, cumsum(replace_na(S, 0)), NA_real_)) %>%
+  ungroup()
+
+# Volume-weighted (Mack) development factors
+dev_factors <- map_dfr(1:(max_dev - 1), function(k) {
+  tmp <- triangle_cum %>%
+    filter(Dev_Yr %in% c(k, k + 1), obs) %>%
+    select(Acc_Yr, Dev_Yr, C) %>%
+    pivot_wider(names_from = Dev_Yr, values_from = C, names_prefix = "d") %>%
+    filter(!is.na(.data[[paste0("d", k)]]),
+           !is.na(.data[[paste0("d", k + 1)]]),
+           .data[[paste0("d", k)]] > 0)
+  tibble(k = k,
+         f_k = sum(tmp[[paste0("d", k + 1)]]) / sum(tmp[[paste0("d", k)]]))
+})
+tail_factor_nominal_raw <- dev_factors$f_k[dev_factors$k == max_dev - 1]
+cat(sprintf("Raw last development factor before truncation: %.6f\n",
+            tail_factor_nominal_raw))
+
+# Tail factor f_14 = 1: claims are essentially closed at Dev 14
+dev_factors$f_k[dev_factors$k == max_dev - 1] <- 1
+
+# Cumulative factors F_k (dev k to ultimate)
+F_k <- tibble(Dev_Yr = 1:max_dev) %>%
+  mutate(F_k = sapply(Dev_Yr, function(k)
+    if (k == max_dev) 1 else prod(dev_factors$f_k[dev_factors$k >= k])))
+
+# Reserve per accident year
+latest_obs <- triangle_cum %>%
+  filter(obs, !is.na(C)) %>%
+  group_by(Acc_Yr) %>%
+  summarise(k_obs = max(Dev_Yr),
+            C_obs = C[Dev_Yr == max(Dev_Yr)],
+            .groups = "drop")
+reserve_unadj <- latest_obs %>%
+  left_join(F_k, by = c("k_obs" = "Dev_Yr")) %>%
+  mutate(C_ult = C_obs * F_k,
+         R_hat = C_ult - C_obs)
+cat("\n=== CL unadjusted reserves ===\n")
+print(reserve_unadj)
+cat(sprintf("Total unadjusted IBNR: %s USD\n",
+            format(round(sum(reserve_unadj$R_hat)), big.mark = ",")))
+```
+
+### Verifying assumption of Chain Ladder (Mack model)
+
+```{r assumption CL, echo=TRUE}
+# We complement 3 Chain-Ladder model assumptions:
+# M1: E[C_{i,k+1} | C_{i,k}] = f_k * C_{i,k}            
+# M2: Var[C_{i,k+1} | C_{i,k}] = sigma_k^2 * C_{i,k}    
+# M3: accident years are independent
+#
+# We compute:
+# Mack's sigma_k^2 estimator
+# Properly standardised residuals z_{i,k}
+# z_{i,k} = (C_{i,k+1} - f_k * C_{i,k}) / (sigma_k * sqrt(C_{i,k}))
+# which under M1+M2 should be ~N(0,1) with no pattern
+# Mack's rank-correlation test for accident-year independence
+
+# Build link_ratios and residuals_df from triangle_cum
+# Pairs (C_{i,k}, C_{i,k+1}) that are both observed
+link_ratios <- triangle_cum %>%
+  filter(obs, !is.na(C)) %>%
+  select(Acc_Yr, Dev_Yr, C) %>%
+  arrange(Acc_Yr, Dev_Yr) %>%
+  group_by(Acc_Yr) %>%
+  mutate(C_k1 = lead(C)) %>%
+  ungroup() %>%
+  filter(!is.na(C_k1), Dev_Yr < max_dev) %>%
+  rename(C_k = C) %>%
+  mutate(link_ratio = C_k1 / C_k) %>%
+  left_join(dev_factors %>% rename(Dev_Yr = k), by = "Dev_Yr") %>%
+  filter(!is.na(f_k))
+
+residuals_df <- link_ratios %>%
+  mutate(fitted   = f_k * C_k,
+         residual = C_k1 - fitted)
+
+# Mack sigma_k^2
+# sigma_k^2 = 1/(I-k-1) * sum_i C_{i,k} * (link_ratio_{i,k} - f_k)^2
+sigma2_mack <- map_dfr(sort(unique(link_ratios$Dev_Yr)), function(k) {
+  sub   <- link_ratios %>% filter(Dev_Yr == k)
+  f_hat <- dev_factors$f_k[dev_factors$k == k]
+  I_k   <- nrow(sub)
+  if (I_k <= 1) return(tibble(Dev_Yr = k, sigma2_k = NA_real_, n_pairs = I_k))
+  s2 <- sum(sub$C_k * (sub$link_ratio - f_hat)^2) / (I_k - 1)
+  tibble(Dev_Yr = k, sigma2_k = s2, n_pairs = I_k)
+})
+
+cat("\n=== Mack sigma_k^2 estimates ===\n")
+print(sigma2_mack %>% mutate(sigma_k = sqrt(sigma2_k)))
+
+# Properly standardised Mack residuals
+mack_resid <- residuals_df %>%
+  left_join(sigma2_mack %>% select(Dev_Yr, sigma2_k), by = "Dev_Yr") %>%
+  mutate(z_mack = (C_k1 - fitted) / (sqrt(sigma2_k) * sqrt(C_k)))
+
+# Plot Mack-standardised residuals vs fitted
+p_mack_resid <- mack_resid %>%
+  filter(!is.na(z_mack)) %>%
+  ggplot(aes(fitted / 1e6, z_mack)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = c(-2, 0, 2),
+             linetype = c("dashed", "solid", "dashed"),
+             color    = c("grey50", "black", "grey50")) +
+  labs(title    = "Mack-standardised residuals z_{i,k} vs fitted",
+       subtitle = "Should look like ~N(0,1): no funnel, no trend, ~95% inside +/-2",
+       x = "Fitted cumulative payment (USD millions)",
+       y = "Mack standardised residual")
+
+if (!dir.exists("figs")) dir.create("figs", recursive = TRUE)
+ggsave("figs/mack_residuals.pdf", p_mack_resid, width = 7, height = 4)
+print(p_mack_resid)
+
+# Sanity numbers: mean and sd of Mack residuals should be ~0 and ~1
+cat("\n=== Mack residual sanity check ===\n")
+cat(sprintf("  mean(z_mack) = %.3f   (target 0)\n",
+            mean(mack_resid$z_mack, na.rm = TRUE)))
+cat(sprintf("  sd  (z_mack) = %.3f   (target 1)\n",
+            sd(mack_resid$z_mack, na.rm = TRUE)))
+cat(sprintf("  %% within +/-2: %.1f%%   (target ~95%%)\n",
+            100 * mean(abs(mack_resid$z_mack) <= 2, na.rm = TRUE)))
+
+# Mack's rank-correlation test for accident-year independence
+# For each k with >= 4 obs, Spearman(C_{i,k}, link_ratio_{i,k})
+mack_indep <- map_dfr(sort(unique(link_ratios$Dev_Yr)), function(k) {
+  sub <- link_ratios %>% filter(Dev_Yr == k)
+  if (nrow(sub) < 4) return(tibble(Dev_Yr = k, rho = NA_real_,
+                                   p_val = NA_real_, n = nrow(sub)))
+  test <- suppressWarnings(cor.test(sub$C_k, sub$link_ratio, method = "spearman"))
+  tibble(Dev_Yr = k, rho = unname(test$estimate),
+         p_val = test$p.value, n = nrow(sub))
+})
+
+cat("\n=== Mack rank-correlation test (M3 — AY independence) ===\n")
+cat("  Spearman rho between C_{i,k} and link_ratio_{i,k}\n")
+cat("  Many small p-values would suggest violation of independence\n")
+print(mack_indep %>% mutate(across(c(rho, p_val), ~ round(., 3))))
+```
+
+## Chain Ladder Inflation-Adjusted
+
+```{r CL inflation-adjusted, echo=TRUE}
+# Inflation index table (one row per calendar year)
+infl_tbl <- claims %>% distinct(Cal_Yr, Accum_Infl_Index_Mid) %>% arrange(Cal_Yr)
+
+# Deflated cumulative triangle
+tri_defl <- triangle_full %>%
+  left_join(infl_tbl, by = "Cal_Yr") %>%
+  mutate(S_def = ifelse(obs, S / Accum_Infl_Index_Mid, NA_real_)) %>%
+  group_by(Acc_Yr) %>% arrange(Dev_Yr, .by_group = TRUE) %>%
+  mutate(C_def = ifelse(obs, cumsum(replace_na(S_def, 0)), NA_real_)) %>%
+  ungroup()
+
+# Development factors on the deflated triangle
+f_def <- map_dfr(1:(max_dev - 1), function(k) {
+  tmp <- tri_defl %>%
+    filter(Dev_Yr %in% c(k, k + 1), obs) %>%
+    select(Acc_Yr, Dev_Yr, C_def) %>%
+    pivot_wider(names_from = Dev_Yr, values_from = C_def, names_prefix = "d") %>%
+    filter(!is.na(.data[[paste0("d", k)]]),
+           !is.na(.data[[paste0("d", k + 1)]]),
+           .data[[paste0("d", k)]] > 0)
+  tibble(k = k,
+         f_def = sum(tmp[[paste0("d", k + 1)]]) / sum(tmp[[paste0("d", k)]]))
+})
+f_def$f_def[f_def$k == max_dev - 1] <- 1
+
+# Project deflated rectangle one step at a time
+rect_def <- tri_defl %>% select(Acc_Yr, Dev_Yr, Cal_Yr, obs, C_def)
+for (ay in ay_range) for (k in 1:(max_dev - 1)) {
+  ic  <- which(rect_def$Acc_Yr == ay & rect_def$Dev_Yr == k)
+  in_ <- which(rect_def$Acc_Yr == ay & rect_def$Dev_Yr == (k + 1))
+  if (!is.na(rect_def$C_def[ic]) && is.na(rect_def$C_def[in_]))
+    rect_def$C_def[in_] <- rect_def$C_def[ic] * f_def$f_def[f_def$k == k]
+}
+
+# Extrapolate inflation index (3-year trailing mean rate) 
+last_rates <- diff(infl_tbl$Accum_Infl_Index_Mid) /
+  head(infl_tbl$Accum_Infl_Index_Mid, -1)
+avg_rate   <- mean(tail(last_rates, 3))
+cat(sprintf("Extrapolating inflation at %.2f%%/yr (3-year trailing mean)\n",
+            100 * avg_rate))
+
+max_cal_future <- max(ay_range) + max_dev - 1
+infl_full <- tibble(Cal_Yr = min(infl_tbl$Cal_Yr):max_cal_future) %>%
+  left_join(infl_tbl, by = "Cal_Yr")
+for (i in 2:nrow(infl_full))
+  if (is.na(infl_full$Accum_Infl_Index_Mid[i]))
+    infl_full$Accum_Infl_Index_Mid[i] <-
+  infl_full$Accum_Infl_Index_Mid[i - 1] * (1 + avg_rate)
+
+# Re-inflate and compute reserve
+reserve_infl <- rect_def %>%
+  group_by(Acc_Yr) %>% arrange(Dev_Yr, .by_group = TRUE) %>%
+  mutate(S_def_proj = C_def - lag(C_def, default = 0)) %>%
+  ungroup() %>%
+  filter(!obs) %>%
+  left_join(infl_full, by = "Cal_Yr") %>%
+  mutate(S_nom_proj = S_def_proj * Accum_Infl_Index_Mid) %>%
+  group_by(Acc_Yr) %>%
+  summarise(R_hat_infl = sum(S_nom_proj, na.rm = TRUE), .groups = "drop")
+
+cat("\n=== CL inflation-adjusted reserves ===\n")
+print(reserve_infl)
+cat(sprintf("Total inflation-adjusted CL Reserve: %s USD\n",
+            format(round(sum(reserve_infl$R_hat_infl)), big.mark = ",")))
+
+# Development factors comparison: nominal vs deflated
+p_factors <- dev_factors %>%
+  rename(f_nominal = f_k) %>%
+  left_join(f_def %>% rename(f_deflated = f_def), by = "k") %>%
+  pivot_longer(-k, names_to = "Type", values_to = "Factor") %>%
+  ggplot(aes(k, Factor, color = Type, group = Type)) +
+  geom_line(linewidth = 1) + geom_point(size = 2) +
+  scale_color_manual(values = c(f_nominal  = "#1b4f72",
+                                f_deflated = "#c0392b"),
+                     labels = c(f_nominal  = "Nominal (unadjusted)",
+                                f_deflated = "Deflated (inflation-adj.)")) +
+  scale_x_continuous(breaks = 1:(max_dev - 1)) +
+  labs(title = "Development factors: nominal vs inflation-adjusted",
+       subtitle = "Deflated factors are uniformly smaller — confirms inflation in the data",
+       x = "Development step k", y = "f_k") +
+  theme(legend.position = "bottom")
+ggsave("figs/dev_factors.pdf", p_factors, width = 7, height = 4)
+print(p_factors)
+```
+
+### Verifying assumption of Chain Ladder (Mack model) on inflation-adjusted triangle
+
+```{r assumption CL inflation-adjusted, echo=TRUE}
+# Build link_ratios_def and residuals_def from tri_defl
+link_ratios_def <- tri_defl %>%
+  filter(obs, !is.na(C_def)) %>%
+  select(Acc_Yr, Dev_Yr, C_def) %>%
+  arrange(Acc_Yr, Dev_Yr) %>%
+  group_by(Acc_Yr) %>%
+  mutate(C_def_k1 = lead(C_def)) %>%
+  ungroup() %>%
+  filter(!is.na(C_def_k1), Dev_Yr < max_dev) %>%
+  rename(C_def_k = C_def) %>%
+  mutate(link_ratio = C_def_k1 / C_def_k) %>%
+  left_join(f_def %>% rename(Dev_Yr = k), by = "Dev_Yr") %>%
+  filter(!is.na(f_def))
+residuals_def <- link_ratios_def %>%
+  mutate(fitted   = f_def * C_def_k,
+         residual = C_def_k1 - fitted)
+
+# Mack sigma_k^2 on deflated triangle
+sigma2_mack_def <- map_dfr(sort(unique(link_ratios_def$Dev_Yr)), function(k) {
+  sub   <- link_ratios_def %>% filter(Dev_Yr == k)
+  f_hat <- f_def$f_def[f_def$k == k]
+  I_k   <- nrow(sub)
+  if (I_k <= 1) return(tibble(Dev_Yr = k, sigma2_k = NA_real_, n_pairs = I_k))
+  s2 <- sum(sub$C_def_k * (sub$link_ratio - f_hat)^2) / (I_k - 1)
+  tibble(Dev_Yr = k, sigma2_k = s2, n_pairs = I_k)
+})
+cat("\n=== Mack sigma_k^2 estimates (deflated) ===\n")
+print(sigma2_mack_def %>% mutate(sigma_k = sqrt(sigma2_k)))
+
+# Properly standardised Mack residuals on deflated triangle
+mack_resid_def <- residuals_def %>%
+  left_join(sigma2_mack_def %>% select(Dev_Yr, sigma2_k), by = "Dev_Yr") %>%
+  mutate(z_mack = (C_def_k1 - fitted) / (sqrt(sigma2_k) * sqrt(C_def_k)))
+p_mack_resid_def <- mack_resid_def %>%
+  filter(!is.na(z_mack)) %>%
+  ggplot(aes(fitted / 1e6, z_mack)) +
+  geom_point(alpha = 0.6) +
+  geom_hline(yintercept = c(-2, 0, 2),
+             linetype = c("dashed", "solid", "dashed"),
+             color    = c("grey50", "black", "grey50")) +
+  labs(title    = "Mack-standardised residuals — inflation-adjusted CL",
+       subtitle = "Should look like ~N(0,1): no funnel, no trend, ~95% inside +/-2",
+       x = "Fitted deflated cumulative payment (USD millions, base year)",
+       y = "Mack standardised residual")
+if (!dir.exists("figs")) dir.create("figs", recursive = TRUE)
+ggsave("figs/mack_residuals_deflated.pdf",
+       p_mack_resid_def, width = 7, height = 4)
+print(p_mack_resid_def)
+cat("\n=== Mack residual sanity check (deflated) ===\n")
+cat(sprintf("  mean(z_mack) = %.3f   (target 0)\n",
+            mean(mack_resid_def$z_mack, na.rm = TRUE)))
+cat(sprintf("  sd  (z_mack) = %.3f   (target 1)\n",
+            sd(mack_resid_def$z_mack, na.rm = TRUE)))
+cat(sprintf("  %% within +/-2: %.1f%%   (target ~95%%)\n",
+            100 * mean(abs(mack_resid_def$z_mack) <= 2, na.rm = TRUE)))
+# Mack rank-correlation test on deflated triangle
+mack_indep_def <- map_dfr(sort(unique(link_ratios_def$Dev_Yr)), function(k) {
+  sub <- link_ratios_def %>% filter(Dev_Yr == k)
+  if (nrow(sub) < 4) return(tibble(Dev_Yr = k, rho = NA_real_,
+                                   p_val = NA_real_, n = nrow(sub)))
+  test <- suppressWarnings(cor.test(sub$C_def_k, sub$link_ratio, method = "spearman"))
+  tibble(Dev_Yr = k, rho = unname(test$estimate),
+         p_val = test$p.value, n = nrow(sub))
+})
+cat("\n=== Mack rank-correlation test (deflated, M3 — AY independence) ===\n")
+cat("  Spearman rho between C_def_{i,k} and link_ratio_def_{i,k}\n")
+print(mack_indep_def %>% mutate(across(c(rho, p_val), ~ round(., 3))))
+
+# Comparison: nominal vs deflated
+if (exists("mack_resid") && exists("mack_indep")) {
+  cat("\n=== Nominal vs deflated — summary comparison ===\n")
+  cmp <- tibble(
+    triangle    = c("nominal", "deflated"),
+    mean_z      = c(mean(mack_resid$z_mack,     na.rm = TRUE),
+                    mean(mack_resid_def$z_mack, na.rm = TRUE)),
+    sd_z        = c(sd(mack_resid$z_mack,       na.rm = TRUE),
+                    sd(mack_resid_def$z_mack,   na.rm = TRUE)),
+    pct_in_2    = c(100 * mean(abs(mack_resid$z_mack)     <= 2, na.rm = TRUE),
+                    100 * mean(abs(mack_resid_def$z_mack) <= 2, na.rm = TRUE)),
+    n_signif_M3 = c(sum(mack_indep$p_val     < 0.05, na.rm = TRUE),
+                    sum(mack_indep_def$p_val < 0.05, na.rm = TRUE))
+  )
+  print(cmp %>% mutate(across(where(is.numeric), ~ round(., 3))))
+}
+```
+
+## Chain Ladder Back Test Validation
+
+Done jointly with the Random Forest backtest. See further down.
+
+## Chain Ladder Super-Inflation Sensitivity
+
+We layer a super-inflation shock on top of the baseline projection, first at a 
+moderate level and then at full strength, to gauge how the reserve estimate 
+responds as the inflationary stress intensifies.
+
+```{r CL super-inflation, echo=TRUE}
+g_discrete  <- exp(g_log) - 1          
+g_moderate  <- g_discrete / 2          # half-rate scenario
+cat(sprintf("\nClaim super-inflation rates:\n"))
+cat(sprintf("  Log-rate (lm coeff):  %+.4f /yr\n", g_log))
+cat(sprintf("  Discrete (exp-1):     %+.2f%% /yr  <- used in multiplier\n",
+            100 * g_discrete))
+cat(sprintf("  Moderate (half):      %+.2f%% /yr\n", 100 * g_moderate))
+max_cal <- max(claims$Cal_Yr)   # 2023
+
+# Future incremental cells (deflated), from the inflation-adjusted CL
+future_cells <- rect_def %>%
+  arrange(Acc_Yr, Dev_Yr) %>%
+  group_by(Acc_Yr) %>%
+  mutate(S_def_proj = C_def - lag(C_def, default = 0)) %>%
+  ungroup() %>%
+  filter(!obs, S_def_proj > 0) %>%
+  select(Acc_Yr, Dev_Yr, Cal_Yr, S_def_proj) %>%
+  left_join(infl_full %>% select(Cal_Yr, Accum_Infl_Index_Mid),
+            by = "Cal_Yr") %>%
+  mutate(
+    S_nom_base  = S_def_proj * Accum_Infl_Index_Mid,
+    years_ahead = Cal_Yr - max_cal,
+    M_moderate = (1 + g_moderate)^years_ahead,
+    M_full     = (1 + g_discrete)^years_ahead,
+    S_nom_mod  = S_nom_base * M_moderate,
+    S_nom_full = S_nom_base * M_full
+  )
+reserves_scenarios <- future_cells %>%
+  group_by(Acc_Yr) %>%
+  summarise(R_base     = sum(S_nom_base, na.rm = TRUE),
+            R_moderate = sum(S_nom_mod,  na.rm = TRUE),
+            R_full     = sum(S_nom_full, na.rm = TRUE),
+            .groups    = "drop")
+
+# Sanity check: base must match reserve_infl
+diff_base <- abs(sum(reserves_scenarios$R_base) -
+                   sum(reserve_infl$R_hat_infl))
+stopifnot(diff_base < 1)  
+cat(sprintf("Sanity check — base vs reserve_infl: diff = $%.0f (OK)\n",
+            diff_base))
+total_base     <- sum(reserves_scenarios$R_base)
+total_moderate <- sum(reserves_scenarios$R_moderate)
+total_full     <- sum(reserves_scenarios$R_full)
+cat(sprintf("\n=== Super-inflation scenarios ===\n"))
+cat(sprintf("Scenario 0 — base (g = 0%%, trend stops):      %s USD\n",
+            format(round(total_base),     big.mark = ",")))
+cat(sprintf("Scenario 1 — moderate (g = %+.2f%%/yr):         %s USD\n",
+            100 * g_moderate,
+            format(round(total_moderate), big.mark = ",")))
+cat(sprintf("Scenario 2 — full (g = %+.2f%%/yr):              %s USD\n",
+            100 * g_discrete,
+            format(round(total_full),     big.mark = ",")))
+cat(sprintf("Sensitivity range: [%s; %s] USD\n",
+            format(round(total_base), big.mark = ","),
+            format(round(total_full), big.mark = ",")))
+p_scenarios <- reserves_scenarios %>%
+  select(Acc_Yr,
+         "Scenario 0 — base (g = 0%)"            = R_base,
+         "Scenario 1 — moderate (g/2)"            = R_moderate,
+         "Scenario 2 — full super-inflation (g)"  = R_full) %>%
+  pivot_longer(-Acc_Yr, names_to = "Scenario", values_to = "Reserve") %>%
+  ggplot(aes(factor(Acc_Yr), Reserve / 1e6, fill = Scenario)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("Scenario 0 — base (g = 0%)"           = "#1b4f72",
+                               "Scenario 1 — moderate (g/2)"           = "#e67e22",
+                               "Scenario 2 — full super-inflation (g)" = "#c0392b")) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "CL reserve sensitivity to claim super-inflation",
+       x = "Accident Year", y = "Reserve (USD millions)") +
+  theme(legend.position = "bottom",
+        legend.text = element_text(size = 8))
+ggsave("figs/super_inflation.pdf", p_scenarios, width = 7, height = 4)
+print(p_scenarios)
+```
+
+# Task 3
+
+## 3-part Random Forest - RBNS projection
+
+```{r 3 RF for RBNS, echo=TRUE}
+# For each (claim, Dev_Yr) row we lag back one step to get the
+# state at the start of the year. lag_open == 1 means the claim
+# was open at the start, this is the condition we train on
+claims_rf <- claims %>%
+  arrange(claim_num, Dev_Yr) %>%
+  group_by(claim_num) %>%
+  mutate(
+    lag_cum_payment  = lag(Acc_Incr_Payment, default = 0),
+    lag_open         = lag(open_ind,         default = 1L),
+    has_paid_before  = as.integer(lag_cum_payment > 0),
+    log_lag_cum      = log1p(lag_cum_payment),
+    dev_ratio        = Dev_Yr / max_dev,
+    has_payment      = as.integer(Incr_Payment > 0),
+    payment_defl     = Incr_Payment / Accum_Infl_Index_Mid,
+    log_payment_defl = ifelse(payment_defl > 0, log(payment_defl), NA_real_),
+    closed_this_yr   = as.integer(lag_open == 1L & open_ind == 0L)
+  ) %>% ungroup()
+feats <- c("Acc_Yr", "Dev_Yr", "Rpt_Yr_Lag",
+           "has_paid_before", "log_lag_cum", "dev_ratio")
+train <- claims_rf %>% filter(lag_open == 1)
+# Fit the three random forests
+rf_freq <- randomForest(
+  x        = train[, feats],
+  y        = as.factor(train$has_payment),
+  ntree    = 200, mtry = 3, maxnodes = 512,
+  sampsize = c("0" = 10000, "1" = 10000)
+)
+sev_tr  <- train %>% filter(has_payment == 1, !is.na(log_payment_defl))
+rf_sev  <- randomForest(
+  x    = sev_tr[, feats],
+  y    = sev_tr$log_payment_defl,
+  ntree = 200, mtry = 3, maxnodes = 512
+)
+# Residual variance for the smearing (log-normal retransformation) correction
+sigma2 <- mean((rf_sev$y - rf_sev$predicted)^2, na.rm = TRUE)
+rf_close <- randomForest(
+  x        = train[, feats],
+  y        = as.factor(train$closed_this_yr),
+  ntree    = 200, mtry = 3, maxnodes = 512,
+  sampsize = c("0" = 10000, "1" = 10000)
+)
+cat(sprintf("\nRF smearing correction — sigma^2 = %.4f\n", sigma2))
+cat("RF feature importances:\n")
+cat("  Frequency: "); print(round(importance(rf_freq) [, 1], 2))
+cat("  Severity : "); print(round(importance(rf_sev)  [, 1], 2))
+cat("  Closure  : "); print(round(importance(rf_close)[, 1], 2))
+
+# OOB performance of the three RFs
+# Out-of-Bag is randomForest's internal cross-validation:
+# each tree is trained on a bootstrap sample, then predictions are
+# made only on the rows not in that bootstrap. This gives an error estimate
+cat("\n=== RF Out-of-Bag (OOB) performance ===\n")
+# Frequency: OOB confusion matrix and error rate
+freq_oob <- rf_freq$confusion
+cat("Frequency RF — OOB confusion matrix:\n")
+print(freq_oob)
+cat(sprintf("  Overall OOB error rate: %.2f%%\n",
+            100 * (1 - sum(diag(freq_oob[, 1:2])) / sum(freq_oob[, 1:2]))))
+# Severity: % variance explained by OOB predictions
+sev_var_expl <- 100 * (1 - mean((rf_sev$y - rf_sev$predicted)^2, na.rm = TRUE) /
+                         var(rf_sev$y, na.rm = TRUE))
+cat(sprintf("Severity RF  — %% variance explained (OOB): %.2f%%\n", sev_var_expl))
+cat(sprintf("Severity RF  — OOB RMSE on log scale:      %.4f\n",
+            sqrt(mean((rf_sev$y - rf_sev$predicted)^2, na.rm = TRUE))))
+# Closure: OOB confusion matrix
+close_oob <- rf_close$confusion
+cat("Closure RF   — OOB confusion matrix:\n")
+print(close_oob)
+cat(sprintf("  Overall OOB error rate: %.2f%%\n",
+            100 * (1 - sum(diag(close_oob[, 1:2])) / sum(close_oob[, 1:2]))))
+
+# RBNS projection loop
+# We carry a "survival probability" prob_open = P(still open at step k),
+# updated multiplicatively after each development year
+state <- claims_rf %>%
+  group_by(claim_num) %>%
+  filter(Dev_Yr == max(Dev_Yr)) %>% ungroup() %>%
+  filter(open_ind == 1, Dev_Yr < max_dev) %>%
+  transmute(claim_num, Acc_Yr, Rpt_Yr_Lag,
+            dev       = Dev_Yr,
+            cum       = Acc_Incr_Payment,
+            prob_open = 1)
+reserves_ml <- tibble(Acc_Yr = ay_range, R_hat_RF = 0)
+for (step in 1:max_dev) {
+  state <- state %>% filter(dev < max_dev)
+  if (nrow(state) == 0) break
+  d_next  <- state$dev + 1
+  cy_next <- state$Acc_Yr + d_next - 1
+  gen_idx <- infl_full$Accum_Infl_Index_Mid[match(cy_next, infl_full$Cal_Yr)]
+  gen_idx[is.na(gen_idx)] <- tail(infl_full$Accum_Infl_Index_Mid, 1)
+  X <- data.frame(
+    Acc_Yr          = state$Acc_Yr,
+    Dev_Yr          = d_next,
+    Rpt_Yr_Lag      = state$Rpt_Yr_Lag,
+    has_paid_before = as.integer(state$cum > 0),
+    log_lag_cum     = log1p(state$cum),
+    dev_ratio       = d_next / max_dev
+  )[, feats]
+  p_pay   <- predict(rf_freq,  X, type = "prob")[, "1"]
+  log_sev <- predict(rf_sev,   X)
+  p_close <- predict(rf_close, X, type = "prob")[, "1"]
+  sev_nom <- exp(log_sev + sigma2 / 2) * gen_idx
+  expected_nominal <- state$prob_open * p_pay * sev_nom
+  tmp <- tibble(Acc_Yr = state$Acc_Yr, pay = expected_nominal) %>%
+    group_by(Acc_Yr) %>% summarise(pay = sum(pay), .groups = "drop")
+  reserves_ml <- reserves_ml %>%
+    left_join(tmp, by = "Acc_Yr") %>%
+    mutate(R_hat_RF = R_hat_RF + replace_na(pay, 0)) %>%
+    select(-pay)
+  state$cum       <- state$cum + expected_nominal
+  state$prob_open <- state$prob_open * (1 - p_close)
+  state$dev       <- d_next
+}
+cat("\n=== RF RBNS reserves ===\n")
+print(reserves_ml)
+cat(sprintf("Total RF RBNS reserve: %s USD\n",
+            format(round(sum(reserves_ml$R_hat_RF)), big.mark = ",")))
+```
+
+### Pure IBNR via reporting-lag Distribution
+
+```{r pure IBNR estimation, echo=TRUE}
+# compute the lag distribution only on fully mature AYs (<= 2013)
+# where every possible lag has had time to be observed
+lag_dist <- claims %>%
+  filter(Acc_Yr <= 2013) %>%           # mature AYs only
+  distinct(claim_num, Acc_Yr, Rpt_Yr_Lag) %>%
+  count(Rpt_Yr_Lag) %>%
+  arrange(Rpt_Yr_Lag) %>%
+  mutate(prop = n / sum(n),
+         cumP = cumsum(prop))
+cat("Rpt_Yr_Lag distribution (based on AY <= 2013 only):\n")
+print(lag_dist)
+n_obs_by_ay <- claims %>%
+  distinct(claim_num, Acc_Yr) %>%
+  count(Acc_Yr, name = "N_obs")
+ibnr_counts <- n_obs_by_ay %>%
+  mutate(
+    thresh  = max_obs_cal - Acc_Yr + 1,
+    P_obs   = sapply(thresh, function(t)
+      sum(lag_dist$prop[lag_dist$Rpt_Yr_Lag <= t])),
+    N_total = round(N_obs / P_obs),
+    N_IBNR  = N_total - N_obs
+  )
+cat("\nExpected IBNR claims by AY:\n")
+print(ibnr_counts %>% select(Acc_Yr, N_obs, thresh, P_obs, N_total, N_IBNR))
+cat(sprintf("Total estimated pure IBNR claims: %d\n", sum(ibnr_counts$N_IBNR)))
+
+# Generate synthetic IBNR claims
+set.seed(42)
+ibnr_synthetic <- ibnr_counts %>%
+  filter(N_IBNR > 0) %>%
+  rowwise() %>%
+  reframe({
+    ay  <- Acc_Yr
+    n   <- N_IBNR
+    thr <- thresh
+    lag_pool <- lag_dist %>% filter(Rpt_Yr_Lag > thr)
+    if (nrow(lag_pool) == 0 || n == 0) {
+      tibble(claim_id = character(0), Acc_Yr = integer(0),
+             Rpt_Yr_Lag = integer(0))
+    } else {
+      sampled_lags <- sample(lag_pool$Rpt_Yr_Lag,
+                             size = n, replace = TRUE,
+                             prob = lag_pool$prop / sum(lag_pool$prop))
+      tibble(claim_id   = paste0("IBNR_", ay, "_", seq_len(n)),
+             Acc_Yr     = as.integer(ay),
+             Rpt_Yr_Lag = as.integer(sampled_lags))
+    }
+  })
+cat(sprintf("Synthetic IBNR claims generated: %d\n", nrow(ibnr_synthetic)))
+
+# Project synthetic IBNR claims with the same RF
+# dev starts at Rpt_Yr_Lag - 1 so first d_next = Rpt_Yr_Lag
+state_ibnr <- ibnr_synthetic %>%
+  transmute(claim_num = claim_id, Acc_Yr, Rpt_Yr_Lag,
+            dev       = as.integer(Rpt_Yr_Lag - 1L),
+            cum       = 0,
+            prob_open = 1)
+reserves_ibnr <- tibble(Acc_Yr = ay_range, R_hat_IBNR = 0)
+for (step in 1:max_dev) {
+  state_ibnr <- state_ibnr %>% filter(dev < max_dev)
+  if (nrow(state_ibnr) == 0) break
+  d_next  <- state_ibnr$dev + 1
+  cy_next <- state_ibnr$Acc_Yr + d_next - 1
+  gen_idx <- infl_full$Accum_Infl_Index_Mid[match(cy_next, infl_full$Cal_Yr)]
+  gen_idx[is.na(gen_idx)] <- tail(infl_full$Accum_Infl_Index_Mid, 1)
+  X_ibnr <- data.frame(
+    Acc_Yr          = state_ibnr$Acc_Yr,
+    Dev_Yr          = d_next,
+    Rpt_Yr_Lag      = state_ibnr$Rpt_Yr_Lag,
+    has_paid_before = as.integer(state_ibnr$cum > 0),
+    log_lag_cum     = log1p(state_ibnr$cum),
+    dev_ratio       = d_next / max_dev
+  )[, feats]
+  p_pay_i   <- predict(rf_freq,  X_ibnr, type = "prob")[, "1"]
+  log_sev_i <- predict(rf_sev,   X_ibnr)
+  p_close_i <- predict(rf_close, X_ibnr, type = "prob")[, "1"]
+  sev_nom_i <- exp(log_sev_i + sigma2 / 2) * gen_idx
+  exp_pay_i <- state_ibnr$prob_open * p_pay_i * sev_nom_i
+  tmp_i <- tibble(Acc_Yr = state_ibnr$Acc_Yr, pay = exp_pay_i) %>%
+    group_by(Acc_Yr) %>% summarise(pay = sum(pay), .groups = "drop")
+  reserves_ibnr <- reserves_ibnr %>%
+    left_join(tmp_i, by = "Acc_Yr") %>%
+    mutate(R_hat_IBNR = R_hat_IBNR + replace_na(pay, 0)) %>%
+    select(-pay)
+  
+  # keep cum in nominal units (consistent with training)
+  state_ibnr$cum       <- state_ibnr$cum + exp_pay_i
+  state_ibnr$prob_open <- state_ibnr$prob_open * (1 - p_close_i)
+  state_ibnr$dev       <- d_next
+}
+cat("\n=== Pure IBNR reserve ===\n")
+print(reserves_ibnr %>% filter(R_hat_IBNR > 0))
+cat(sprintf("Total pure IBNR: %s USD\n",
+            format(round(sum(reserves_ibnr$R_hat_IBNR)), big.mark = ",")))
+
+# Combined RBNS + pure IBNR
+reserves_rf_total <- reserves_ml %>%
+  rename(R_RBNS = R_hat_RF) %>%
+  left_join(reserves_ibnr, by = "Acc_Yr") %>%
+  mutate(R_hat_IBNR = replace_na(R_hat_IBNR, 0),
+         R_RF_total = R_RBNS + R_hat_IBNR)
+cat(sprintf("\nRF RBNS:       %s USD\n",
+            format(round(sum(reserves_rf_total$R_RBNS)),      big.mark = ",")))
+cat(sprintf("RF pure IBNR:  %s USD\n",
+            format(round(sum(reserves_rf_total$R_hat_IBNR)),  big.mark = ",")))
+cat(sprintf("RF TOTAL:      %s USD\n",
+            format(round(sum(reserves_rf_total$R_RF_total)),  big.mark = ",")))
+p_rbns_ibnr <- reserves_rf_total %>%
+  select(Acc_Yr, `RBNS (already reported)` = R_RBNS,
+         `Pure IBNR (not yet reported)` = R_hat_IBNR) %>%
+  pivot_longer(-Acc_Yr, names_to = "Component", values_to = "Reserve") %>%
+  ggplot(aes(factor(Acc_Yr), Reserve / 1e6, fill = Component)) +
+  geom_col() +
+  scale_fill_manual(values = c("RBNS (already reported)"   = "#e67e22",
+                               "Pure IBNR (not yet reported)" = "#c0392b")) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "RF reserve: RBNS + pure IBNR by accident year",
+       x = "Accident Year", y = "Reserve (USD millions)") +
+  theme(legend.position = "bottom")
+ggsave("figs/rbns_ibnr.pdf", p_rbns_ibnr, width = 7, height = 4)
+print(p_rbns_ibnr)
+```
+
+### Backtest Validation Framework
+We use the same cut-off years for both models. For each CUT, only information 
+available up to that calendar year is used.
+Chain-Ladder:
+* fitted on the truncated inflation-adjusted triangle
+* projects future payments beyond CUT
+
+Random Forest:
+* trained on claim-level data observed up to CUT
+* projects future payments for open claims
+
+In both cases, predictions are compared with actual payments observed after CUT. 
+We report Total_err_pct, i.e. the portfolio-level error: 
+(total predicted - total actual) / total actual. This is the metric used in the graph.
+
+```{r unified-backtest-validation, echo=TRUE}
+# We report Total_err_pct:
+# 100 * (total predicted - total actual) / total actual
+# this is the portfolio-level error used in the graph.
+cut_years <- 2016:2020
+
+# Inflation-adjusted Chain-Ladder backtest
+run_backtest_infl_cl <- function(CUT) {
+  ay_train <- ay_range[ay_range <= CUT]
+  triangle_cut <- expand_grid(Acc_Yr = ay_train, Dev_Yr = 1:max_dev) %>%
+    mutate(
+      Cal_Yr = Acc_Yr + Dev_Yr - 1,
+      obs    = Cal_Yr <= CUT
+    ) %>%
+    left_join(triangle_incr, by = c("Acc_Yr", "Dev_Yr")) %>%
+    mutate(S = ifelse(obs, replace_na(S, 0), NA_real_))
+  triangle_defl_cut <- triangle_cut %>%
+    left_join(infl_tbl, by = "Cal_Yr") %>%
+    mutate(S_def = ifelse(obs, S / Accum_Infl_Index_Mid, NA_real_)) %>%
+    group_by(Acc_Yr) %>%
+    arrange(Dev_Yr, .by_group = TRUE) %>%
+    mutate(C_def = ifelse(obs, cumsum(replace_na(S_def, 0)), NA_real_)) %>%
+    ungroup()
+  dev_factors_def_cut <- map_dfr(1:(max_dev - 1), function(k) {
+    tmp <- triangle_defl_cut %>%
+      filter(Dev_Yr %in% c(k, k + 1), obs) %>%
+      select(Acc_Yr, Dev_Yr, C_def) %>%
+      pivot_wider(
+        names_from = Dev_Yr,
+        values_from = C_def,
+        names_prefix = "d"
+      )
+    col_k  <- paste0("d", k)
+    col_k1 <- paste0("d", k + 1)
+    if (!col_k %in% names(tmp) || !col_k1 %in% names(tmp)) {
+      return(tibble(k = k, f_k = 1))
+    }
+    tmp <- tmp %>%
+      filter(
+        !is.na(.data[[col_k]]),
+        !is.na(.data[[col_k1]]),
+        .data[[col_k]] > 0
+      )
+    if (nrow(tmp) == 0) return(tibble(k = k, f_k = 1))
+    tibble(
+      k = k,
+      f_k = sum(tmp[[col_k1]]) / sum(tmp[[col_k]])
+    )
+  })
+  dev_factors_def_cut$f_k[dev_factors_def_cut$k == max_dev - 1] <- 1
+  rect_def_cut <- triangle_defl_cut %>%
+    select(Acc_Yr, Dev_Yr, Cal_Yr, obs, C_def) %>%
+    arrange(Acc_Yr, Dev_Yr)
+  for (ay in ay_train) {
+    for (k in 1:(max_dev - 1)) {
+      ic  <- which(rect_def_cut$Acc_Yr == ay & rect_def_cut$Dev_Yr == k)
+      in_ <- which(rect_def_cut$Acc_Yr == ay & rect_def_cut$Dev_Yr == (k + 1))
+      if (
+        length(ic) > 0 && length(in_) > 0 &&
+        !is.na(rect_def_cut$C_def[ic]) &&
+        is.na(rect_def_cut$C_def[in_])
+      ) {
+        rect_def_cut$C_def[in_] <- rect_def_cut$C_def[ic] *
+          dev_factors_def_cut$f_k[dev_factors_def_cut$k == k]
+      }
+    }
+  }
+  pred_window <- rect_def_cut %>%
+    group_by(Acc_Yr) %>%
+    arrange(Dev_Yr, .by_group = TRUE) %>%
+    mutate(S_def_proj = C_def - lag(C_def, default = 0)) %>%
+    ungroup() %>%
+    filter(!obs, Cal_Yr > CUT, Cal_Yr <= max_obs_cal, S_def_proj > 0) %>%
+    left_join(infl_tbl, by = "Cal_Yr") %>%
+    mutate(S_proj = S_def_proj * Accum_Infl_Index_Mid) %>%
+    group_by(Acc_Yr) %>%
+    summarise(R_pred = sum(S_proj, na.rm = TRUE), .groups = "drop")
+  actual_window <- claims %>%
+    filter(Acc_Yr %in% ay_train, Cal_Yr > CUT, Cal_Yr <= max_obs_cal) %>%
+    group_by(Acc_Yr) %>%
+    summarise(R_actual = sum(Incr_Payment, na.rm = TRUE), .groups = "drop")
+  pred_window %>%
+    full_join(actual_window, by = "Acc_Yr") %>%
+    mutate(
+      R_pred    = replace_na(R_pred, 0),
+      R_actual  = replace_na(R_actual, 0),
+      Error     = R_pred - R_actual,
+      Rel_Error = ifelse(R_actual > 0, Error / R_actual, NA_real_),
+      CUT       = CUT
+    )
+}
+bt_infl_all <- map_dfr(cut_years, run_backtest_infl_cl)
+bt_infl_summary <- bt_infl_all %>%
+  group_by(CUT) %>%
+  summarise(
+    n_AY           = n(),
+    Total_pred_M   = sum(R_pred) / 1e6,
+    Total_actual_M = sum(R_actual) / 1e6,
+    Total_err_pct  = 100 * (sum(R_pred) - sum(R_actual)) /
+      max(sum(R_actual), 1),
+    .groups = "drop"
+  )
+
+# Random Forest backtest
+run_rf_backtest <- function(CUT) {
+  set.seed(1000 + CUT)
+  claims_rf_tv <- claims_rf %>%
+    mutate(in_train = Cal_Yr <= CUT)
+  train_cv <- claims_rf_tv %>%
+    filter(in_train, lag_open == 1)
+  freq_tab <- table(as.factor(train_cv$has_payment))
+  ss_freq  <- min(10000, floor(0.9 * min(freq_tab)))
+  rf_freq_cv <- randomForest(
+    x = train_cv[, feats],
+    y = as.factor(train_cv$has_payment),
+    ntree = 200,
+    mtry = 3,
+    maxnodes = 512,
+    sampsize = c("0" = ss_freq, "1" = ss_freq)
+  )
+  sev_tr_cv <- train_cv %>%
+    filter(has_payment == 1, !is.na(log_payment_defl))
+  rf_sev_cv <- randomForest(
+    x = sev_tr_cv[, feats],
+    y = sev_tr_cv$log_payment_defl,
+    ntree = 200,
+    mtry = 3,
+    maxnodes = 512
+  )
+  sigma2_cv <- mean((rf_sev_cv$y - rf_sev_cv$predicted)^2, na.rm = TRUE)
+  close_tab <- table(as.factor(train_cv$closed_this_yr))
+  ss_close  <- min(10000, floor(0.9 * min(close_tab)))
+  rf_close_cv <- randomForest(
+    x = train_cv[, feats],
+    y = as.factor(train_cv$closed_this_yr),
+    ntree = 200,
+    mtry = 3,
+    maxnodes = 512,
+    sampsize = c("0" = ss_close, "1" = ss_close)
+  )
+  state_cv <- claims_rf_tv %>%
+    filter(in_train) %>%
+    group_by(claim_num) %>%
+    filter(Dev_Yr == max(Dev_Yr)) %>%
+    ungroup() %>%
+    filter(open_ind == 1, Dev_Yr < max_dev) %>%
+    transmute(
+      claim_num,
+      Acc_Yr,
+      Rpt_Yr_Lag,
+      dev = Dev_Yr,
+      cum = Acc_Incr_Payment,
+      prob_open = 1
+    )
+  proj_cv <- tibble(
+    claim_num = character(),
+    Acc_Yr = integer(),
+    Cal_Yr_proj = integer(),
+    pay_pred = double()
+  )
+  state_loop <- state_cv
+  for (step in 1:max_dev) {
+    state_loop <- state_loop %>%
+      filter(dev < max_dev)
+    if (nrow(state_loop) == 0) break
+    d_next  <- state_loop$dev + 1
+    cy_next <- state_loop$Acc_Yr + d_next - 1
+    gen_idx <- infl_full$Accum_Infl_Index_Mid[
+      match(cy_next, infl_full$Cal_Yr)
+    ]
+    gen_idx[is.na(gen_idx)] <- tail(infl_full$Accum_Infl_Index_Mid, 1)
+    X_cv <- data.frame(
+      Acc_Yr          = state_loop$Acc_Yr,
+      Dev_Yr          = d_next,
+      Rpt_Yr_Lag      = state_loop$Rpt_Yr_Lag,
+      has_paid_before = as.integer(state_loop$cum > 0),
+      log_lag_cum     = log1p(state_loop$cum),
+      dev_ratio       = d_next / max_dev
+    )[, feats]
+    p_pay_cv   <- predict(rf_freq_cv, X_cv, type = "prob")[, "1"]
+    log_sev_cv <- predict(rf_sev_cv, X_cv)
+    p_close_cv <- predict(rf_close_cv, X_cv, type = "prob")[, "1"]
+    sev_nom_cv <- exp(log_sev_cv + sigma2_cv / 2) * gen_idx
+    exp_pay_cv <- state_loop$prob_open * p_pay_cv * sev_nom_cv
+    proj_cv <- bind_rows(
+      proj_cv,
+      tibble(
+        claim_num   = state_loop$claim_num,
+        Acc_Yr      = state_loop$Acc_Yr,
+        Cal_Yr_proj = cy_next,
+        pay_pred    = exp_pay_cv
+      )
+    )
+    state_loop$cum       <- state_loop$cum + exp_pay_cv
+    state_loop$prob_open <- state_loop$prob_open * (1 - p_close_cv)
+    state_loop$dev       <- d_next
+  }
+  real_pay <- claims %>%
+    filter(
+      claim_num %in% state_cv$claim_num,
+      Cal_Yr > CUT,
+      Cal_Yr <= max_obs_cal
+    ) %>%
+    group_by(Acc_Yr) %>%
+    summarise(R_actual = sum(Incr_Payment, na.rm = TRUE), .groups = "drop")
+  pred_pay <- proj_cv %>%
+    filter(Cal_Yr_proj > CUT, Cal_Yr_proj <= max_obs_cal) %>%
+    group_by(Acc_Yr) %>%
+    summarise(R_pred = sum(pay_pred), .groups = "drop")
+  pred_pay %>%
+    full_join(real_pay, by = "Acc_Yr") %>%
+    mutate(
+      R_pred    = replace_na(R_pred, 0),
+      R_actual  = replace_na(R_actual, 0),
+      Error     = R_pred - R_actual,
+      Rel_Error = ifelse(R_actual > 0, Error / R_actual, NA_real_),
+      CUT       = CUT
+    )
+}
+bt_rf_all <- map_dfr(cut_years, run_rf_backtest)
+bt_rf_summary <- bt_rf_all %>%
+  group_by(CUT) %>%
+  summarise(
+    n_AY           = n(),
+    Total_pred_M   = sum(R_pred) / 1e6,
+    Total_actual_M = sum(R_actual) / 1e6,
+    Total_err_pct  = 100 * (sum(R_pred) - sum(R_actual)) /
+      max(sum(R_actual), 1),
+    .groups = "drop"
+  )
+
+# comparison
+bt_compare <- bind_rows(
+  bt_infl_summary %>% mutate(Method = "CL Inflation-Adjusted"),
+  bt_rf_summary   %>% mutate(Method = "Random Forest")
+)
+bt_compare_table <- bt_compare %>%
+  select(CUT, Method, Total_pred_M, Total_actual_M, Total_err_pct) %>%
+  mutate(
+    Total_pred_M   = round(Total_pred_M, 1),
+    Total_actual_M = round(Total_actual_M, 1),
+    Total_err_pct  = round(Total_err_pct, 1)
+  ) %>%
+  arrange(CUT, Method)
+cat("\n=== Portfolio-level total error by cut-off year ===\n")
+print(bt_compare_table)
+bt_compare_wide <- bt_compare %>%
+  select(CUT, Method, Total_err_pct) %>%
+  pivot_wider(
+    names_from = Method,
+    values_from = Total_err_pct
+  ) %>%
+  mutate(across(where(is.numeric), ~ round(., 1))) %>%
+  arrange(CUT)
+cat("\n=== Total error (%) used in the graph ===\n")
+print(bt_compare_wide)
+p_bt_compare <- bt_compare %>%
+  ggplot(aes(x = factor(CUT), y = Total_err_pct, fill = Method)) +
+  geom_col(position = "dodge") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_fill_manual(values = c(
+    "CL Inflation-Adjusted" = "#2ecc71",
+    "Random Forest"        = "#e74c3c"
+  )) +
+  labs(
+    title = "Backtest: inflation-adjusted CL vs RF — total error by cut-off year",
+    subtitle = "Negative = underestimation, positive = overestimation",
+    x = "Cut-off year",
+    y = "Total error (%)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+ggsave(filename = "figs/backtest_infl_cl_vs_rf.png", plot = p_bt_compare,
+       width = 8, height = 4, dpi = 300)
+print(p_bt_compare)
+```
+
+### Cox PH Correction for Right-Censoring
+
+```{r cox right-censoring, echo=TRUE}
+# Survival dataset (one row per claim)
+# event = 1 if the claim was observed to close, 0 if still open
+# at its last observed Dev_Yr (right-censored)
+surv_data <- claims_rf %>%
+  group_by(claim_num) %>%
+  summarise(
+    Acc_Yr         = first(Acc_Yr),
+    Rpt_Yr_Lag     = first(Rpt_Yr_Lag),
+    time_obs       = as.numeric(max(Dev_Yr) - min(Dev_Yr) + 1),
+    event          = as.integer(any(open_ind == 0)),
+    log_total_paid = log1p(max(Acc_Incr_Payment)),
+    has_paid       = as.integer(max(Acc_Incr_Payment) > 0),
+    .groups        = "drop"
+  ) %>%
+  filter(time_obs >= 1)   # drop degenerate cases 
+cat(sprintf("Survival dataset: %d claims\n", nrow(surv_data)))
+cat(sprintf("  Closed   (event=1): %d  (%.1f%%)\n",
+            sum(surv_data$event == 1), 100 * mean(surv_data$event == 1)))
+cat(sprintf("  Censored (event=0): %d  (%.1f%%)\n",
+            sum(surv_data$event == 0), 100 * mean(surv_data$event == 0)))
+cat("\nCensoring rate by Acc_Yr:\n")
+print(surv_data %>%
+        group_by(Acc_Yr) %>%
+        summarise(n_claims   = n(),
+                  n_censored = sum(event == 0),
+                  pct_cens   = round(100 * mean(event == 0), 1),
+                  .groups    = "drop"))
+
+# Kaplan-Meier (unconditional baseline)
+km_fit  <- survfit(Surv(time_obs, event) ~ 1, data = surv_data)
+km_summ <- summary(km_fit, times = 1:max_dev)
+
+cat("\nKaplan-Meier S(t) = P(claim still open at Dev_Yr t):\n")
+print(data.frame(Dev_Yr  = km_summ$time,
+                 S_t     = round(km_summ$surv, 3),
+                 n_risk  = km_summ$n.risk,
+                 n_event = km_summ$n.event))
+p_km <- data.frame(t  = km_summ$time, S  = km_summ$surv,
+                   lo = km_summ$lower, hi = km_summ$upper) %>%
+  ggplot(aes(t, S)) +
+  geom_step(color = "#1b4f72", linewidth = 1) +
+  geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2, fill = "#1b4f72") +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "grey50") +
+  scale_x_continuous(breaks = 1:max_dev) +
+  labs(title = "Kaplan-Meier survival curve",
+       subtitle = "S(t) = P(claim still open at Dev_Yr t) — band = 95% CI",
+       x = "Development Year", y = "P(claim open)")
+ggsave("figs/kaplan_meier.pdf", p_km, width = 6, height = 4)
+print(p_km)
+
+# Cox PH model
+# Acc_Yr as continuous covariate to share one baseline
+# hazard across all AYs — avoids flat curves in recent AYs with few events.
+cox_fit <- coxph(
+  Surv(time_obs, event) ~
+    Acc_Yr + Rpt_Yr_Lag + has_paid + log_total_paid,
+  data = surv_data,
+  ties = "efron"
+)
+cat("\n=== Cox PH summary ===\n")
+print(summary(cox_fit))
+cat(sprintf("C-index: %.4f\n\n", summary(cox_fit)$concordance["C"]))
+
+# get_survival_matrix(): for each row of newdata, compute S(t) at
+# each integer t = 1, ..., max_dev. Returns matrix [n_claims x (max_dev+1)]
+# where column 1 = S(0) = 1 and column k+1 = S(k)
+get_survival_matrix <- function(newdata, times = 1:max_dev) {
+  n  <- nrow(newdata)
+  sf <- survfit(cox_fit, newdata = newdata, se.fit = FALSE)
+  t_raw <- sf$time
+  s_raw <- sf$surv
+  if (!is.matrix(s_raw)) s_raw <- matrix(s_raw, ncol = 1)
+  S_mat <- matrix(NA_real_, nrow = n, ncol = length(times))
+  for (j in seq_len(n)) {
+    S_mat[j, ] <- approx(t_raw, s_raw[, j], xout = times,
+                         method = "constant", rule = 2, f = 0)$y
+  }
+  cbind(1, S_mat)  
+}
+
+# conditional_p_close(): 1 - S(d)/S(d-1), clamped to [0, 1]
+conditional_p_close <- function(S_with_t0, d_vec) {
+  n      <- nrow(S_with_t0)
+  d_safe <- pmin(as.integer(d_vec), max_dev)
+  S_prev <- S_with_t0[cbind(seq_len(n), d_safe)]
+  S_curr <- S_with_t0[cbind(seq_len(n), d_safe + 1L)]
+  pmax(0, pmin(1, 1 - S_curr / pmax(S_prev, 1e-10)))
+}
+
+# RBNS projection with Cox closure
+open_rbns <- claims_rf %>%
+  group_by(claim_num) %>%
+  filter(Dev_Yr == max(Dev_Yr)) %>% ungroup() %>%
+  filter(open_ind == 1, Dev_Yr < max_dev)
+cat(sprintf("Open RBNS claims to project: %d\n", nrow(open_rbns)))
+cox_nd_rbns <- open_rbns %>%
+  transmute(Acc_Yr, Rpt_Yr_Lag,
+            has_paid       = as.integer(Acc_Incr_Payment > 0),
+            log_total_paid = log1p(Acc_Incr_Payment))
+S_rbns <- get_survival_matrix(cox_nd_rbns)
+state_cox <- open_rbns %>%
+  transmute(claim_num, Acc_Yr, Rpt_Yr_Lag,
+            dev = Dev_Yr, cum = Acc_Incr_Payment,
+            prob_open = 1, row_idx = row_number())
+reserves_cox_rbns <- tibble(Acc_Yr = ay_range, R_Cox_RBNS = 0)
+for (step in seq_len(max_dev)) {
+  state_cox <- state_cox %>% filter(dev < max_dev)
+  if (nrow(state_cox) == 0) break
+  d_next  <- state_cox$dev + 1
+  cy_next <- state_cox$Acc_Yr + d_next - 1
+  gen_idx <- infl_full$Accum_Infl_Index_Mid[match(cy_next, infl_full$Cal_Yr)]
+  gen_idx[is.na(gen_idx)] <- tail(infl_full$Accum_Infl_Index_Mid, 1)
+  X <- data.frame(
+    Acc_Yr          = state_cox$Acc_Yr,
+    Dev_Yr          = d_next,
+    Rpt_Yr_Lag      = state_cox$Rpt_Yr_Lag,
+    has_paid_before = as.integer(state_cox$cum > 0),
+    log_lag_cum     = log1p(state_cox$cum),
+    dev_ratio       = d_next / max_dev
+  )[, feats]
+  p_pay   <- predict(rf_freq, X, type = "prob")[, "1"]
+  log_sev <- predict(rf_sev,  X)
+  sev_nom <- exp(log_sev + sigma2 / 2) * gen_idx
+  
+  # Cox is built on elapsed time (max(Dev_Yr) - min(Dev_Yr) + 1)
+  # so the survival lookup must also use elapsed time, not absolute Dev_Yr
+  # Elapsed at end of step k is: d_next - Rpt_Yr_Lag + 1
+  elapsed_next <- d_next - state_cox$Rpt_Yr_Lag + 1
+  elapsed_next <- pmax(elapsed_next, 1L)
+  p_close <- conditional_p_close(
+    S_rbns[state_cox$row_idx, , drop = FALSE],
+    d_vec = elapsed_next
+  )
+  exp_pay <- state_cox$prob_open * p_pay * sev_nom
+  tmp <- tibble(Acc_Yr = state_cox$Acc_Yr, pay = exp_pay) %>%
+    group_by(Acc_Yr) %>% summarise(pay = sum(pay), .groups = "drop")
+  reserves_cox_rbns <- reserves_cox_rbns %>%
+    left_join(tmp, by = "Acc_Yr") %>%
+    mutate(R_Cox_RBNS = R_Cox_RBNS + replace_na(pay, 0)) %>%
+    select(-pay)
+  state_cox$cum       <- state_cox$cum + exp_pay
+  state_cox$prob_open <- state_cox$prob_open * (1 - p_close)
+  state_cox$dev       <- d_next
+}
+cat("=== RBNS reserve (Cox closure) ===\n")
+print(reserves_cox_rbns)
+cat(sprintf("Total RBNS (Cox): %s USD\n\n",
+            format(round(sum(reserves_cox_rbns$R_Cox_RBNS)), big.mark = ",")))
+
+# Final RF total: RBNS(Cox) + IBNR(rf_close)
+# IBNR uses rf_close (not Cox): synthetic claims have no observed history
+# so right-censoring bias does not apply
+# rf_close is unbiased at low Dev_Yr where IBNR claims start
+reserves_cox_total <- reserves_cox_rbns %>%
+  left_join(reserves_ibnr, by = "Acc_Yr") %>% 
+  mutate(
+    R_hat_IBNR  = replace_na(R_hat_IBNR, 0),
+    R_Cox_total = R_Cox_RBNS + R_hat_IBNR
+  )
+cat("=== RF FINAL: RBNS(Cox) + IBNR(rf_close) ===\n")
+print(reserves_cox_total)
+cat(sprintf("RF RBNS  (Cox closure):      %s USD\n",
+            format(round(sum(reserves_cox_total$R_Cox_RBNS)),  big.mark = ",")))
+cat(sprintf("RF IBNR  (rf_close, no Cox): %s USD\n",
+            format(round(sum(reserves_cox_total$R_hat_IBNR)),  big.mark = ",")))
+cat(sprintf("RF TOTAL:                    %s USD\n",
+            format(round(sum(reserves_cox_total$R_Cox_total)), big.mark = ",")))
+```
+
+### Full Comparison Plot
+
+We compare the different methods used to caculate the reserve.
+
+```{r methods, echo=TRUE}
+compare_all <- reserve_infl %>%
+  select(Acc_Yr, R_CL = R_hat_infl) %>%
+  left_join(reserves_scenarios %>% select(Acc_Yr, R_CL_mod = R_moderate), by = "Acc_Yr") %>%
+  left_join(reserves_ml        %>% rename(R_RF_orig = R_hat_RF),          by = "Acc_Yr") %>%
+  left_join(reserves_rf_total  %>% select(Acc_Yr, R_RF_IBNR = R_RF_total), by = "Acc_Yr") %>%
+  left_join(reserves_cox_total %>% select(Acc_Yr, R_Cox_total),           by = "Acc_Yr") %>%
+  mutate(across(where(is.numeric), ~ replace_na(., 0)))
+
+p_all <- compare_all %>%
+  select(Acc_Yr,
+         "1. CL infl-adjusted"          = R_CL,
+         "2. CL moderate super-infl"    = R_CL_mod,
+         "3. RF original"               = R_RF_orig,
+         "4. RF + IBNR"                 = R_RF_IBNR,
+         "5. RF Cox + IBNR"             = R_Cox_total) %>%
+  pivot_longer(-Acc_Yr, names_to = "Method", values_to = "Reserve") %>%
+  ggplot(aes(factor(Acc_Yr), Reserve / 1e6, fill = Method)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("1. CL infl-adjusted"       = "#1b4f72",
+                               "2. CL moderate super-infl" = "#8e44ad",
+                               "3. RF original"            = "#e67e22",
+                               "4. RF + IBNR"              = "#c0392b",
+                               "5. RF Cox + IBNR"          = "#27ae60")) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Reserve estimates — all methods by Accident Year",
+       x = "Accident Year", y = "Reserve (USD millions)") +
+  theme(legend.position = "bottom",
+        legend.text = element_text(size = 8))
+ggsave("figs/all_methods.pdf", p_all, width = 8, height = 4)
+print(p_all)
+```
+
+## Bootstrap for Chain Ladder
+
+```{r bootstrap CL inflation-adjusted, echo=TRUE}
+B <- 100   # bootstrap replicates
+
+# (1) Use deflated development factors and deflated triangle
+f_vec        <- f_def$f_def
+names(f_vec) <- as.character(f_def$k)
+
+# Back-fit the fitted DEFLATED cumulative & incremental triangle
+# Convention: on the latest observed diagonal, fitted = observed
+# Earlier cumulatives are recovered via hat_C_{i,j-1} = hat_C_{i,j} / f_{j-1}
+fitted_tri <- tri_defl %>%
+  filter(obs) %>%
+  select(Acc_Yr, Dev_Yr, Cal_Yr, C_def) %>%
+  rename(C = C_def) %>%               # uniformiser le nom pour le reste du code
+  arrange(Acc_Yr, Dev_Yr)
+fitted_tri$hat_C <- NA_real_
+for (ay in unique(fitted_tri$Acc_Yr)) {
+  rows  <- which(fitted_tri$Acc_Yr == ay)
+  ks    <- fitted_tri$Dev_Yr[rows]
+  k_max <- max(ks)
+  fitted_tri$hat_C[rows[ks == k_max]] <- fitted_tri$C[rows[ks == k_max]]
+  if (k_max > 1) for (k in seq(k_max - 1, 1)) {
+    fitted_tri$hat_C[rows[ks == k]] <-
+      fitted_tri$hat_C[rows[ks == k + 1]] / f_vec[as.character(k)]
+  }
+}
+fitted_tri <- fitted_tri %>%
+  group_by(Acc_Yr) %>% arrange(Dev_Yr, .by_group = TRUE) %>%
+  mutate(hat_S = hat_C - lag(hat_C, default = 0),
+         S     = C     - lag(C,     default = 0)) %>%
+  ungroup()
+
+# Pearson residuals on DEFLATED scale + degrees-of-freedom adjustment
+res_pool_df <- fitted_tri %>%
+  filter(hat_S > 0) %>%
+  mutate(pearson = (S - hat_S) / sqrt(hat_S))
+N <- nrow(res_pool_df)
+p <- 2 * max_dev - 1
+res_pool <- res_pool_df$pearson * sqrt(N / (N - p))
+cat(sprintf("Residual pool (deflated): N=%d cells, p=%d params, scale=%.4f\n",
+            N, p, sqrt(N / (N - p))))
+
+# Bootstrap loop
+boot_total <- numeric(B)
+boot_by_ay <- matrix(NA_real_, nrow = B, ncol = length(ay_range),
+                     dimnames = list(NULL, as.character(ay_range)))
+for (b in seq_len(B)) {
+
+  # (a) Resample residuals -> pseudo-S (deflated)
+  pseudo <- fitted_tri %>%
+    mutate(r_star = sample(res_pool, n(), replace = TRUE),
+           S_star = ifelse(hat_S > 0,
+                           hat_S + r_star * sqrt(pmax(hat_S, 0)),
+                           hat_S),
+           S_star = pmax(S_star, 0))
+
+  # (b) Re-cumulate the pseudo upper triangle (deflated)
+  cum_star <- pseudo %>%
+    group_by(Acc_Yr) %>% arrange(Dev_Yr, .by_group = TRUE) %>%
+    mutate(C_star = cumsum(S_star)) %>% ungroup()
+
+  # (c) Re-estimate volume-weighted f* on the pseudo triangle
+  f_star <- map_dfr(1:(max_dev - 1), function(k) {
+    tmp <- cum_star %>%
+      filter(Dev_Yr %in% c(k, k + 1)) %>%
+      select(Acc_Yr, Dev_Yr, C_star) %>%
+      pivot_wider(names_from = Dev_Yr, values_from = C_star,
+                  names_prefix = "d") %>%
+      filter(!is.na(.data[[paste0("d", k)]]),
+             !is.na(.data[[paste0("d", k + 1)]]),
+             .data[[paste0("d", k)]] > 0)
+    if (nrow(tmp) == 0 || sum(tmp[[paste0("d", k)]]) == 0)
+      return(tibble(k = k, f = 1))
+    tibble(k = k,
+           f = sum(tmp[[paste0("d", k + 1)]]) /
+               sum(tmp[[paste0("d", k)]]))
+  })
+  f_star$f[f_star$k == max_dev - 1] <- 1
+
+  # (d) Project the full DEFLATED rectangle one step at a time
+  rect_b <- expand_grid(Acc_Yr = ay_range, Dev_Yr = 1:max_dev) %>%
+    mutate(Cal_Yr = Acc_Yr + Dev_Yr - 1,
+           obs    = Cal_Yr <= max_cal) %>%
+    left_join(cum_star %>% select(Acc_Yr, Dev_Yr, C_star),
+              by = c("Acc_Yr", "Dev_Yr")) %>%
+    arrange(Acc_Yr, Dev_Yr)
+
+  for (ay in ay_range) for (k in 1:(max_dev - 1)) {
+    ic  <- which(rect_b$Acc_Yr == ay & rect_b$Dev_Yr == k)
+    in_ <- which(rect_b$Acc_Yr == ay & rect_b$Dev_Yr == (k + 1))
+    if (length(ic) > 0 && length(in_) > 0 &&
+        !is.na(rect_b$C_star[ic]) && is.na(rect_b$C_star[in_]))
+      rect_b$C_star[in_] <- rect_b$C_star[ic] *
+        f_star$f[f_star$k == k]
+  }
+
+  # (e) Deflated future incrementals -> RE-INFLATE -> nominal reserve per AY
+  res_b <- rect_b %>%
+    group_by(Acc_Yr) %>% arrange(Dev_Yr, .by_group = TRUE) %>%
+    mutate(S_def_proj = C_star - lag(C_star, default = 0)) %>%
+    ungroup() %>%
+    filter(!obs) %>%
+    left_join(infl_full, by = "Cal_Yr") %>%
+    mutate(S_nom_proj = S_def_proj * Accum_Infl_Index_Mid) %>%
+    group_by(Acc_Yr) %>%
+    summarise(R = sum(S_nom_proj, na.rm = TRUE), .groups = "drop")
+
+  boot_total[b] <- sum(res_b$R)
+  boot_by_ay[b, as.character(res_b$Acc_Yr)] <- res_b$R
+}
+
+# Percentile CIs — compare against the inflation-adjusted point estimate
+ci_total <- quantile(boot_total, c(0.025, 0.5, 0.975))
+R_point  <- sum(reserve_infl$R_hat_infl)
+cat("\n=== Bootstrap CI for total INFLATION-ADJUSTED chain-ladder reserve ===\n")
+cat(sprintf("  B replicates:        %d\n", B))
+cat(sprintf("  CL point estimate:   %s USD\n",
+            format(round(R_point),     big.mark = ",")))
+cat(sprintf("  Bootstrap median:    %s USD\n",
+            format(round(ci_total[2]), big.mark = ",")))
+cat(sprintf("  Bootstrap mean:      %s USD\n",
+            format(round(mean(boot_total)), big.mark = ",")))
+cat(sprintf("  Bootstrap SE:        %s USD  (CV = %.1f%%)\n",
+            format(round(sd(boot_total)),   big.mark = ","),
+            100 * sd(boot_total) / mean(boot_total)))
+cat(sprintf("  95%% percentile CI:  [%s ; %s] USD\n",
+            format(round(ci_total[1]), big.mark = ","),
+            format(round(ci_total[3]), big.mark = ",")))
+
+# Per-AY CIs
+ci_by_ay <- apply(boot_by_ay, 2, quantile,
+                  probs = c(0.025, 0.5, 0.975), na.rm = TRUE) %>%
+  t() %>% as.data.frame() %>%
+  setNames(c("lo", "med", "hi")) %>%
+  tibble::rownames_to_column("Acc_Yr") %>%
+  mutate(Acc_Yr = as.integer(Acc_Yr)) %>%
+  left_join(reserve_infl %>% rename(R_hat = R_hat_infl), by = "Acc_Yr") %>%
+  select(Acc_Yr, R_hat, lo, med, hi)
+cat("\nBootstrap CI by accident year (USD millions):\n")
+print(ci_by_ay %>%
+        mutate(across(c(R_hat, lo, med, hi), ~ round(. / 1e6, 2))))
+
+# Plot the predictive distribution
+p_boot <- tibble(R = boot_total) %>%
+  ggplot(aes(R / 1e6)) +
+  geom_histogram(bins = 15, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = R_point / 1e6, color = "red", linewidth = 1) +
+  geom_vline(xintercept = ci_total[c(1, 3)] / 1e6,
+             color = "darkgreen", linetype = 2, linewidth = 0.7) +
+  scale_x_continuous(labels = comma) +
+  labs(title    = sprintf("Bootstrap predictive distribution inflation-adjusted CL (B=%d)", B),
+       subtitle = "red = inflation-adjusted CL point estimate; green dashed = 95% percentile CI",
+       x = "Total reserve (USD millions)", y = "Count")
+ggsave("figs/bootstrap_CL_inflation.pdf", p_boot, width = 7, height = 4)
+print(p_boot)
+```
+
+## Bootstrap for Random Forest
+
+```{r bootstrap RF, echo=TRUE}
+# Two sources of uncertainty:
+# 1. Sampling variability in historical claims 
+# 2. Poisson uncertainty on N_IBNR            
+FEATS    <- feats
+MAX_DEV  <- max_dev
+claims   <- claims_rf
+result   <- reserves_rf_total %>% rename(R_TOTAL = R_RF_total)
+get_infl <- function(cy) {
+  i <- infl_full$Accum_Infl_Index_Mid[match(cy, infl_full$Cal_Yr)]
+  i[is.na(i)] <- tail(infl_full$Accum_Infl_Index_Mid, 1)
+  i
+}
+boot_one <- function(boot_claims, seed) {
+  set.seed(seed)
+  rf_freq_b <- randomForest(
+    x = boot_claims[, FEATS], y = factor(boot_claims$has_payment),
+    ntree = 500, mtry = 3, maxnodes = 512, nodesize = 20,
+    classwt = c("0" = 1,
+                "1" = sum(boot_claims$has_payment == 0) /
+                  max(sum(boot_claims$has_payment == 1), 1))
+  )
+  sev_b <- boot_claims %>%
+    filter(has_payment == 1, !is.na(log_payment_defl))
+  rf_sev_b <- randomForest(
+    x = sev_b[, FEATS], y = sev_b$log_payment_defl,
+    ntree = 500, mtry = 2, maxnodes = 256, nodesize = 20
+  )
+  sigma2_b <- mean((sev_b$log_payment_defl -
+                      predict(rf_sev_b, sev_b[, FEATS]))^2, na.rm = TRUE)
+  rf_close_b <- randomForest(
+    x = boot_claims[, FEATS], y = factor(boot_claims$closed_this_yr),
+    ntree = 500, mtry = 3, maxnodes = 512, nodesize = 20,
+    classwt = c("0" = 1,
+                "1" = sum(boot_claims$closed_this_yr == 0) /
+                  max(sum(boot_claims$closed_this_yr == 1), 1))
+  )
+  proj <- function(state) {
+    total <- 0
+    for (s in seq_len(MAX_DEV)) {
+      state <- state %>% filter(dev < MAX_DEV); if (nrow(state) == 0) break
+      d_next  <- state$dev + 1
+      cy_next <- state$Acc_Yr + d_next - 1
+      X <- data.frame(
+        Acc_Yr          = state$Acc_Yr,
+        Dev_Yr          = d_next,
+        Rpt_Yr_Lag      = state$Rpt_Yr_Lag,
+        has_paid_before = as.integer(state$cum > 0),
+        log_lag_cum     = log1p(state$cum),
+        dev_ratio       = d_next / MAX_DEV
+      )[, FEATS]
+      p_pay   <- predict(rf_freq_b,  X, type = "prob")[, "1"]
+      log_sev <- predict(rf_sev_b,   X)
+      p_close <- predict(rf_close_b, X, type = "prob")[, "1"]
+      sev_nom <- exp(log_sev + sigma2_b / 2) * get_infl(cy_next)
+      exp_pay <- state$prob_open * p_pay * sev_nom
+      total   <- total + sum(exp_pay)
+      state   <- state %>% mutate(
+        cum       = cum + exp_pay,
+        prob_open = prob_open * (1 - p_close),
+        dev       = d_next
+      )
+    }
+    total
+  }
+  state_rbns <- claims %>%
+    group_by(claim_num) %>% slice_max(Dev_Yr) %>% ungroup() %>%
+    filter(open_ind == 1, Dev_Yr < MAX_DEV) %>%
+    transmute(claim_num, Acc_Yr, Rpt_Yr_Lag,
+              dev = Dev_Yr, cum = Acc_Incr_Payment, prob_open = 1.0)
+  R_rbns <- proj(state_rbns)
+  ibnr_b <- ibnr_counts %>%
+    rowwise() %>%
+    mutate(N_IBNR_b = rpois(1, lambda = max(N_IBNR, 0))) %>%
+    ungroup()
+  ibnr_synth_b <- purrr::map_dfr(seq_len(nrow(ibnr_b)), function(i) {
+    r <- ibnr_b[i, ]; if (r$N_IBNR_b == 0) return(tibble())
+    pool <- lag_dist %>% filter(Rpt_Yr_Lag > r$thresh)
+    if (nrow(pool) == 0) return(tibble())
+    ll <- sample(pool$Rpt_Yr_Lag, size = r$N_IBNR_b, replace = TRUE,
+                 prob = pool$prop / sum(pool$prop))
+    tibble(claim_id   = paste0("IBNR_", r$Acc_Yr, "_", seq_len(r$N_IBNR_b)),
+           Acc_Yr     = as.integer(r$Acc_Yr),
+           Rpt_Yr_Lag = as.integer(ll))
+  })
+  state_ibnr <- ibnr_synth_b %>%
+    transmute(claim_num = claim_id, Acc_Yr, Rpt_Yr_Lag,
+              dev = as.integer(Rpt_Yr_Lag - 1L),
+              cum = 0, prob_open = 1.0)
+  R_ibnr <- if (nrow(state_ibnr) > 0) proj(state_ibnr) else 0
+  c(RBNS = R_rbns, IBNR = R_ibnr, TOTAL = R_rbns + R_ibnr)
+}
+
+# Bootstrap loop
+B <- 100
+claim_ids <- unique(claims$claim_num)
+cat(sprintf("\nRunning %d bootstrap replicates...\n", B))
+boot_results <- matrix(NA, nrow = B, ncol = 3,
+                       dimnames = list(NULL, c("RBNS", "IBNR", "TOTAL")))
+t0 <- Sys.time()
+for (b in seq_len(B)) {
+  set.seed(1000 + b)
+  sampled_ids <- sample(claim_ids, length(claim_ids), replace = TRUE)
+  boot_claims <- tibble(claim_num = sampled_ids,
+                        boot_id = seq_along(sampled_ids)) %>%
+    inner_join(claims, by = "claim_num", relationship = "many-to-many") %>%
+    mutate(claim_num = paste0(claim_num, "_b", boot_id)) %>%
+    select(-boot_id)
+  boot_results[b, ] <- tryCatch(
+    boot_one(boot_claims, seed = 2000 + b),
+    error = function(e) { cat("  iter", b, "failed:", e$message, "\n"); rep(NA, 3) }
+  )
+  cat(sprintf("  iter %2d/%d: TOTAL = $%s   elapsed: %.1f min\n",
+              b, B,
+              format(round(boot_results[b, "TOTAL"]), big.mark = ","),
+              as.numeric(difftime(Sys.time(), t0, units = "mins"))))
+}
+
+# Summarize — 95% CI (2.5% / 97.5%)
+boot_df <- as_tibble(boot_results) %>% filter(!is.na(TOTAL))
+
+ci_fn <- function(x, p = c(0.025, 0.50, 0.975)) {
+  setNames(quantile(x, p, na.rm = TRUE), c("p025", "p50", "p975"))
+}
+cat("\n══════════ BOOTSTRAP RESULTS ══════════\n")
+cat(sprintf("Replicates that succeeded: %d / %d\n\n", nrow(boot_df), B))
+for (col in c("RBNS", "IBNR", "TOTAL")) {
+  q <- ci_fn(boot_df[[col]])
+  cat(sprintf("%-5s : mean = $%s, 95%% CI = [$%s, $%s]\n",
+              col,
+              format(round(mean(boot_df[[col]])),  big.mark = ","),
+              format(round(q["p025"]),              big.mark = ","),
+              format(round(q["p975"]),              big.mark = ",")))
+}
+cat(sprintf("\nPoint estimate from main run: $%s\n",
+            format(round(sum(result$R_TOTAL)), big.mark = ",")))
+
+# Histogram (95% CI)
+p_boot_rf <- ggplot(boot_df, aes(x = TOTAL / 1e6)) +
+  geom_histogram(bins = 20, fill = "#534AB7", color = "white") +
+  geom_vline(xintercept = sum(result$R_TOTAL) / 1e6,
+             color = "#1D9E75", linetype = "dashed", linewidth = 1) +
+  geom_vline(xintercept = quantile(boot_df$TOTAL, c(0.025, 0.975)) / 1e6,
+             color = "black", linetype = "dotted") +
+  labs(title    = sprintf("Bootstrap distribution of total RF reserve (B = %d)", nrow(boot_df)),
+       subtitle = sprintf("Point estimate $%.0fM, 95%% CI [$%.0fM, $%.0fM]",
+                          sum(result$R_TOTAL)/1e6,
+                          quantile(boot_df$TOTAL, 0.025)/1e6,
+                          quantile(boot_df$TOTAL, 0.975)/1e6),
+       x = "Reserve (USD millions)", y = "Frequency") +
+  theme_minimal(base_size = 12)
+ggsave("figs/bootstrap_RF.pdf", p_boot_rf, width = 7, height = 4)
+print(p_boot_rf)
+```
+
+```{r bootstrap RF by AY, echo=TRUE}
+FEATS    <- feats
+MAX_DEV  <- max_dev
+claims   <- claims_rf
+result   <- reserves_rf_total %>% rename(R_TOTAL = R_RF_total)
+get_infl <- function(cy) {
+  i <- infl_full$Accum_Infl_Index_Mid[match(cy, infl_full$Cal_Yr)]
+  i[is.na(i)] <- tail(infl_full$Accum_Infl_Index_Mid, 1)
+  i
+}
+boot_one <- function(boot_claims, seed) {
+  set.seed(seed)
+  
+  # training of the 3 RFs
+  rf_freq_b <- randomForest(
+    x = boot_claims[, FEATS], y = factor(boot_claims$has_payment),
+    ntree = 500, mtry = 3, maxnodes = 512, nodesize = 20,
+    classwt = c("0" = 1,
+                "1" = sum(boot_claims$has_payment == 0) /
+                  max(sum(boot_claims$has_payment == 1), 1))
+  )
+  sev_b <- boot_claims %>%
+    filter(has_payment == 1, !is.na(log_payment_defl))
+  rf_sev_b <- randomForest(
+    x = sev_b[, FEATS], y = sev_b$log_payment_defl,
+    ntree = 500, mtry = 2, maxnodes = 256, nodesize = 20
+  )
+  sigma2_b <- mean((sev_b$log_payment_defl -
+                      predict(rf_sev_b, sev_b[, FEATS]))^2, na.rm = TRUE)
+  rf_close_b <- randomForest(
+    x = boot_claims[, FEATS], y = factor(boot_claims$closed_this_yr),
+    ntree = 500, mtry = 3, maxnodes = 512, nodesize = 20,
+    classwt = c("0" = 1,
+                "1" = sum(boot_claims$closed_this_yr == 0) /
+                  max(sum(boot_claims$closed_this_yr == 1), 1))
+  )
+  
+  proj <- function(state) {
+    res_by_ay <- tibble(Acc_Yr = ay_range, R = 0)
+    for (s in seq_len(MAX_DEV)) {
+      state <- state %>% filter(dev < MAX_DEV); if (nrow(state) == 0) break
+      d_next  <- state$dev + 1
+      cy_next <- state$Acc_Yr + d_next - 1
+      X <- data.frame(
+        Acc_Yr          = state$Acc_Yr,
+        Dev_Yr          = d_next,
+        Rpt_Yr_Lag      = state$Rpt_Yr_Lag,
+        has_paid_before = as.integer(state$cum > 0),
+        log_lag_cum     = log1p(state$cum),
+        dev_ratio       = d_next / MAX_DEV
+      )[, FEATS]
+      p_pay   <- predict(rf_freq_b,  X, type = "prob")[, "1"]
+      log_sev <- predict(rf_sev_b,   X)
+      p_close <- predict(rf_close_b, X, type = "prob")[, "1"]
+      sev_nom <- exp(log_sev + sigma2_b / 2) * get_infl(cy_next)
+      exp_pay <- state$prob_open * p_pay * sev_nom
+      
+      # accumulate by Acc_Yr
+      tmp <- tibble(Acc_Yr = state$Acc_Yr, pay = exp_pay) %>%
+        group_by(Acc_Yr) %>% summarise(pay = sum(pay), .groups = "drop")
+      res_by_ay <- res_by_ay %>%
+        left_join(tmp, by = "Acc_Yr") %>%
+        mutate(R = R + replace_na(pay, 0)) %>%
+        select(-pay)
+      state <- state %>% mutate(
+        cum       = cum + exp_pay,
+        prob_open = prob_open * (1 - p_close),
+        dev       = d_next
+      )
+    }
+    res_by_ay
+  }
+  
+  # RBNS
+  state_rbns <- claims %>%
+    group_by(claim_num) %>% slice_max(Dev_Yr) %>% ungroup() %>%
+    filter(open_ind == 1, Dev_Yr < MAX_DEV) %>%
+    transmute(claim_num, Acc_Yr, Rpt_Yr_Lag,
+              dev = Dev_Yr, cum = Acc_Incr_Payment, prob_open = 1.0)
+  R_rbns_ay <- proj(state_rbns)
+  
+  # IBNR (identical)
+  ibnr_b <- ibnr_counts %>%
+    rowwise() %>%
+    mutate(N_IBNR_b = rpois(1, lambda = max(N_IBNR, 0))) %>%
+    ungroup()
+  ibnr_synth_b <- purrr::map_dfr(seq_len(nrow(ibnr_b)), function(i) {
+    r <- ibnr_b[i, ]; if (r$N_IBNR_b == 0) return(tibble())
+    pool <- lag_dist %>% filter(Rpt_Yr_Lag > r$thresh)
+    if (nrow(pool) == 0) return(tibble())
+    ll <- sample(pool$Rpt_Yr_Lag, size = r$N_IBNR_b, replace = TRUE,
+                 prob = pool$prop / sum(pool$prop))
+    tibble(claim_id   = paste0("IBNR_", r$Acc_Yr, "_", seq_len(r$N_IBNR_b)),
+           Acc_Yr     = as.integer(r$Acc_Yr),
+           Rpt_Yr_Lag = as.integer(ll))
+  })
+  state_ibnr <- ibnr_synth_b %>%
+    transmute(claim_num = claim_id, Acc_Yr, Rpt_Yr_Lag,
+              dev = as.integer(Rpt_Yr_Lag - 1L),
+              cum = 0, prob_open = 1.0)
+  R_ibnr_ay <- if (nrow(state_ibnr) > 0) proj(state_ibnr)
+               else tibble(Acc_Yr = ay_range, R = 0)
+  
+  R_total_ay <- R_rbns_ay %>%
+    rename(R_RBNS = R) %>%
+    left_join(R_ibnr_ay %>% rename(R_IBNR = R), by = "Acc_Yr") %>%
+    mutate(R_IBNR = replace_na(R_IBNR, 0),
+           R_TOT  = R_RBNS + R_IBNR)
+  
+  list(by_ay  = R_total_ay,
+       totals = c(RBNS  = sum(R_total_ay$R_RBNS),
+                  IBNR  = sum(R_total_ay$R_IBNR),
+                  TOTAL = sum(R_total_ay$R_TOT)))
+}
+
+# Bootstrap loop
+B <- 100
+claim_ids <- unique(claims$claim_num)
+boot_results  <- matrix(NA, nrow = B, ncol = 3,
+                        dimnames = list(NULL, c("RBNS", "IBNR", "TOTAL")))
+boot_rf_by_ay <- matrix(NA_real_, nrow = B, ncol = length(ay_range),
+                        dimnames = list(NULL, as.character(ay_range)))
+cat(sprintf("\nRunning %d RF bootstrap replicates (with by-AY tracking)...\n", B))
+t0 <- Sys.time()
+for (b in seq_len(B)) {
+  set.seed(1000 + b)
+  sampled_ids <- sample(claim_ids, length(claim_ids), replace = TRUE)
+  boot_claims <- tibble(claim_num = sampled_ids,
+                        boot_id = seq_along(sampled_ids)) %>%
+    inner_join(claims, by = "claim_num", relationship = "many-to-many") %>%
+    mutate(claim_num = paste0(claim_num, "_b", boot_id)) %>%
+    select(-boot_id)
+  out <- tryCatch(
+    boot_one(boot_claims, seed = 2000 + b),
+    error = function(e) { cat("  iter", b, "failed:", e$message, "\n"); NULL }
+  )
+  if (!is.null(out)) {
+    boot_results[b, ]  <- out$totals
+    boot_rf_by_ay[b, as.character(out$by_ay$Acc_Yr)] <- out$by_ay$R_TOT
+  }
+  cat(sprintf("  iter %2d/%d: TOTAL = $%s   elapsed: %.1f min\n",
+              b, B,
+              format(round(boot_results[b, "TOTAL"]), big.mark = ","),
+              as.numeric(difftime(Sys.time(), t0, units = "mins"))))
+}
+
+# Save to disk to avoid re-running the bootstrap (it's slow)
+saveRDS(boot_rf_by_ay, "boot_rf_by_ay.rds")
+saveRDS(boot_results,  "boot_rf_totals.rds")
+```
+
+## Variance-based credibility combination of CL and RF
+
+$$
+\hat{R}_i^{blend} = (1-z_i)\hat{R}_i^{CL,adj} + z_i \hat{R}_i^{RF+IBNR}
+$$
+
+```{r combination CL-RF, echo=TRUE}
+# Bootstrap variances by accident year
+var_cl <- apply(boot_by_ay,    2, var, na.rm = TRUE)
+var_rf <- apply(boot_rf_by_ay, 2, var, na.rm = TRUE)
+
+# weights
+z_var <- var_cl / (var_cl + var_rf)
+z_tbl <- tibble(
+  Acc_Yr = as.integer(names(var_cl)),
+  var_CL = var_cl,
+  var_RF = var_rf,
+  z      = z_var
+) %>%
+  mutate(z = ifelse(is.na(z) | is.nan(z), 0.5, z))
+cat("\n=== Variance-based bootstrap weights (Neuhaus-Mack) ===\n")
+print(z_tbl %>% mutate(across(starts_with("var_"), ~ round(. / 1e12, 2)),
+                       z = round(z, 3)))
+
+# Blend
+bf_blend_var <- z_tbl %>%
+  left_join(reserve_infl       %>% select(Acc_Yr, R_CL_adj  = R_hat_infl),  by = "Acc_Yr") %>%
+  left_join(reserves_rf_total  %>% select(Acc_Yr, R_RF_IBNR = R_RF_total), by = "Acc_Yr") %>%
+  mutate(
+    R_CL_adj   = replace_na(R_CL_adj,  0),
+    R_RF_IBNR  = replace_na(R_RF_IBNR, 0),
+    #       (1 - z) = CL weight,  z = RF weight
+    R_blend_var = (1 - z) * R_CL_adj + z * R_RF_IBNR
+  )
+cat(sprintf("\n  Total CL inflation-adj: %s USD\n",
+            format(round(sum(bf_blend_var$R_CL_adj)),    big.mark = ",")))
+cat(sprintf("  Total RF + IBNR:        %s USD\n",
+            format(round(sum(bf_blend_var$R_RF_IBNR)),   big.mark = ",")))
+cat(sprintf("  Total VAR-based blend:  %s USD\n",
+            format(round(sum(bf_blend_var$R_blend_var)), big.mark = ",")))
+print(bf_blend_var %>%
+        select(Acc_Yr, z, R_CL_adj, R_RF_IBNR, R_blend_var) %>%
+        mutate(z = round(z, 3),
+               across(starts_with("R_"), ~ round(. / 1e6, 2))))
+```
+
+```{r plot blend variance, echo=TRUE}
+# Weights by AY
+p_z_var <- bf_blend_var %>%
+  mutate(`Weight on RF (z)`     = z,
+         `Weight on CL (1-z)`   = 1 - z) %>%
+  select(Acc_Yr, `Weight on CL (1-z)`, `Weight on RF (z)`) %>%
+  pivot_longer(-Acc_Yr, names_to = "Component", values_to = "Weight") %>%
+  ggplot(aes(factor(Acc_Yr), Weight, fill = Component)) +
+  geom_col() +
+  scale_fill_manual(values = c("Weight on CL (1-z)" = "#1b4f72",
+                               "Weight on RF (z)"   = "#e67e22")) +
+  labs(title    = "Variance-based credibility weights by accident year",
+       subtitle = "z = Var_CL / (Var_CL + Var_RF)",
+       x = "Accident Year", y = "Weight") +
+  theme(legend.position = "bottom")
+ggsave("figs/bf_weights_var.pdf", p_z_var, width = 7, height = 4)
+print(p_z_var)
+
+# Comparison of the three blend types (var-based vs 1/F vs components)
+p_compare_blends <- bf_blend_var %>%
+  select(Acc_Yr, R_CL_adj, R_RF_IBNR, R_blend_var) %>%
+  pivot_longer(-Acc_Yr, names_to = "Method", values_to = "Reserve") %>%
+  mutate(Method = recode(Method,
+                         R_CL_adj    = "CL inflation-adj",
+                         R_RF_IBNR   = "RF + IBNR",
+                         R_blend_var = "Blend z = Var-based")) %>%
+  ggplot(aes(factor(Acc_Yr), Reserve / 1e6, fill = Method)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("CL inflation-adj"      = "#1b4f72",
+                               "RF + IBNR"             = "#e67e22",
+                               "Blend z = Var-based"   = "#8e44ad")) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Reserve estimates: CL, RF, and variance-based blend",
+       x = "Accident Year", y = "Reserve (USD millions)") +
+  theme(legend.position = "bottom")
+ggsave("figs/blends_compare.pdf", p_compare_blends, width = 8, height = 4.5)
+print(p_compare_blends)
+```
+
+```{r blend var total summary, echo=TRUE}
+#  Final summary: total reserve comparison across the three methods
+R_tot_CL    <- sum(bf_blend_var$R_CL_adj)
+R_tot_RF    <- sum(bf_blend_var$R_RF_IBNR)
+R_tot_blend <- sum(bf_blend_var$R_blend_var)
+
+cat("\n══════ TOTAL RESERVE — method comparison ═══════\n")
+cat(sprintf("  CL inflation-adjusted    : %s USD  (%.0f M)\n",
+            format(round(R_tot_CL),    big.mark = ","), R_tot_CL    / 1e6))
+cat(sprintf("  RF + IBNR                : %s USD  (%.0f M)\n",
+            format(round(R_tot_RF),    big.mark = ","), R_tot_RF    / 1e6))
+cat(sprintf("  Blend z = Var-based      : %s USD  (%.0f M)\n",
+            format(round(R_tot_blend), big.mark = ","), R_tot_blend / 1e6))
+cat(sprintf("  ─────────────────────────────────────────────\n"))
+cat(sprintf("  Blend position within the CL–RF range: %.0f%%\n",
+            100 * (R_tot_blend - R_tot_CL) / (R_tot_RF - R_tot_CL)))
+```
+
+### other graphs
+
+```{r other graphs, echo=TRUE}
+fig_cl_vs_rf_rbns <- reserve_infl %>%
+  select(Acc_Yr, `CL inflation-adjusted` = R_hat_infl) %>%
+  full_join(
+    reserves_ml %>% select(Acc_Yr, `RF (RBNS only, no IBNR)` = R_hat_RF),
+    by = "Acc_Yr"
+  ) %>%
+  mutate(across(where(is.numeric), ~ replace_na(., 0))) %>%
+  pivot_longer(-Acc_Yr, names_to = "Method", values_to = "Reserve") %>%
+  ggplot(aes(factor(Acc_Yr), Reserve / 1e6, fill = Method)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c(
+    "CL inflation-adjusted" = "#1b4f72",
+    "RF (RBNS only, no IBNR)" = "#e67e22"
+  )) +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "CL inflation-adjusted vs RF (RBNS only) by accident year",
+    x = "Accident Year",
+    y = "Reserve (USD millions)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "bottom")
+ggsave("figs/fig6_cl_vs_rf_rbns.pdf",
+       fig_cl_vs_rf_rbns, width = 7, height = 4)
+print(fig_cl_vs_rf_rbns)
+
+reserve_summary <- data.frame(
+  Method = c(
+    "CL infl-adjusted",
+    "RF RBNS",
+    "RF + IBNR",
+    "CL moderate",
+    "CL full",
+    "RF + Cox + IBNR",
+    "Var-based blend"
+  ),
+  Reserve_M = c(
+    sum(reserve_infl$R_hat_infl, na.rm = TRUE) / 1e6,
+    sum(reserves_ml$R_hat_RF, na.rm = TRUE) / 1e6,
+    sum(reserves_rf_total$R_RF_total, na.rm = TRUE) / 1e6,
+    sum(reserves_scenarios$R_moderate, na.rm = TRUE) / 1e6,
+    sum(reserves_scenarios$R_full, na.rm = TRUE) / 1e6,
+    sum(reserves_cox_total$R_Cox_total, na.rm = TRUE) / 1e6,
+    sum(bf_blend_var$R_blend_var, na.rm = TRUE) / 1e6
+  )
+)
+reserve_summary <- reserve_summary[order(reserve_summary$Reserve_M), ]
+reserve_summary$Method <- factor(reserve_summary$Method, levels = reserve_summary$Method)
+fig10_convergence <- ggplot(reserve_summary,
+                            aes(x = Method, y = Reserve_M, fill = Method)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = paste0(round(Reserve_M), "M")),
+            vjust = -0.4, fontface = "bold", size = 4) +
+  scale_y_continuous(
+    labels = comma,
+    limits = c(0, max(reserve_summary$Reserve_M) * 1.15)
+  ) +
+  scale_fill_manual(values = c(
+    "CL infl-adjusted" = "#1b4f72",
+    "RF RBNS" = "#e67e22",
+    "RF + IBNR" = "#c0392b",
+    "CL moderate" = "#8e44ad",
+    "CL full" = "#d35400",
+    "RF + Cox + IBNR" = "#27ae60",
+    "Var-based blend" = "#16a085"
+  )) +
+  labs(
+    title = "Reserve estimates across main methods",
+    x = NULL,
+    y = "Total reserve (USD millions)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 25, hjust = 1)
+  )
+ggsave("figs/fig10_convergence.png",
+       fig10_convergence, width = 8, height = 5, dpi = 300)
+print(fig10_convergence)
+```
+
+```{r, echo=TRUE}
+reserve_summary <- data.frame(
+  Method = c(
+    "CL infl-adjusted",
+    "RF RBNS",
+    "RF + IBNR",
+    "CL moderate",
+    "CL full",
+    "Var-based blend"
+  ),
+  Reserve_M = c(
+    sum(reserve_infl$R_hat_infl, na.rm = TRUE) / 1e6,
+    sum(reserves_ml$R_hat_RF, na.rm = TRUE) / 1e6,
+    sum(reserves_rf_total$R_RF_total, na.rm = TRUE) / 1e6,
+    sum(reserves_scenarios$R_moderate, na.rm = TRUE) / 1e6,
+    sum(reserves_scenarios$R_full, na.rm = TRUE) / 1e6,
+    sum(bf_blend_var$R_blend_var, na.rm = TRUE) / 1e6
+  )
+)
+reserve_summary <- reserve_summary[order(reserve_summary$Reserve_M), ]
+reserve_summary$Method <- factor(reserve_summary$Method, levels = reserve_summary$Method)
+fig10_conv <- ggplot(reserve_summary,
+                            aes(x = Method, y = Reserve_M, fill = Method)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = paste0(round(Reserve_M), "M")),
+            vjust = -0.4, fontface = "bold", size = 4) +
+  scale_y_continuous(
+    labels = comma,
+    limits = c(0, max(reserve_summary$Reserve_M) * 1.15)
+  ) +
+  scale_fill_manual(values = c(
+    "CL infl-adjusted" = "#1b4f72",
+    "RF RBNS" = "#e67e22",
+    "RF + IBNR" = "#c0392b",
+    "CL moderate" = "#8e44ad",
+    "CL full" = "#d35400",
+    "Var-based blend" = "#16a085"
+  )) +
+  labs(
+    title = "Reserve estimates across main methods",
+    x = NULL,
+    y = "Total reserve (USD millions)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 25, hjust = 1)
+  )
+print(fig10_conv)
+```
+
