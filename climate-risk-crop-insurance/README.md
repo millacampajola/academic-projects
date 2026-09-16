@@ -2,32 +2,25 @@
 
 ## Overview
 
-This project investigates the spatial and temporal dynamics of climate risk and its financial impact on the California crop insurance market.
-
-The analysis is based on a 22-year panel dataset combining climate and agricultural data from NOAA and USDA.
+This project investigates the spatial and temporal dynamics of climate risk and their financial impact on the California crop insurance market, using a 22-year panel dataset combining climate data (NOAA) and agricultural data (USDA).
 
 ## Methodology
 
-The project includes:
-
-- Spatial-temporal analysis of climate risk
-- Analysis of drought and weather indices
-- Unsupervised learning using K-Means clustering
-- Assessment of regional vulnerability
+- Spatial-temporal analysis of climate risk (drought and weather indices)
+- Unsupervised clustering (K-Means) to identify regional vulnerability patterns
 - Analysis of yield shocks and water dependence
-- Evaluation of crop insurance premiums and cross-subsidization
-- Interactive geospatial visualization
+- Evaluation of crop insurance premiums and cross-subsidization across regions
+- Interactive geospatial visualization of risk indicators
 
 ## Results
 
-The analysis identifies distinct regional patterns of climate vulnerability and investigates their implications for crop yields and agricultural insurance.
+The analysis identifies distinct regional patterns of climate vulnerability and their implications for crop yields and insurance pricing, supported by interactive geospatial dashboards for risk visualization and policy evaluation.
 
-Interactive geospatial dashboards were developed to support risk visualization and actuarial policy evaluation.
+## Repository structure
+
+- `code/` – analysis notebook (Quarto)
+- `report/` – rendered report and presentation slides
 
 ## Tools
 
-- Python
-- Pandas
-- NumPy
-- Scikit-learn
-- Data visualization and geospatial analysis
+- Python (pandas, NumPy, scikit-learn), geospatial visualization
