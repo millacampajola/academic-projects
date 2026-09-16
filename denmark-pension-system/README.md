@@ -20,7 +20,3 @@ The analysis covers the system's three pillars, its historical evolution, and it
 ## Repository structure
 
 - `report/` – presentation slides
-
-## Authors
-
-Aranxa Perez Oviedo, Milla Campajola
